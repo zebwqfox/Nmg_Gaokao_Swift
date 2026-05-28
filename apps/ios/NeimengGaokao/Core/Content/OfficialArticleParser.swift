@@ -151,8 +151,10 @@ enum OfficialArticleParser {
       "发布时间", "来源：", "来源:", "var xgwd", "document.write",
       "function goPAGE", "$.ajax", "政务服务", "网站地图", "蒙ICP备", "蒙公网安备"
     ]
-    for marker in noise where let range = text.range(of: marker) {
-      text = String(text[..<range.lowerBound]).normalizedWhitespace
+    if let earliest = noise.compactMap({ text.range(of: $0)?.lowerBound }).min(by: {
+      text.distance(from: text.startIndex, to: $0) < text.distance(from: text.startIndex, to: $1)
+    }) {
+      text = String(text[..<earliest]).normalizedWhitespace
     }
 
     if let titleRange = text.range(of: title) {
