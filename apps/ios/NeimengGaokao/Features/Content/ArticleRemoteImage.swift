@@ -2,12 +2,27 @@ import SwiftUI
 import UIKit
 
 struct ArticleRemoteImage: View {
-  let url: URL
+  let remoteURL: URL?
+  let inlineData: Data?
   let caption: String
   var referer: URL?
 
   @State private var image: UIImage?
   @State private var failed = false
+
+  init(url: URL, caption: String, referer: URL? = nil) {
+    self.remoteURL = url
+    self.inlineData = nil
+    self.caption = caption
+    self.referer = referer
+  }
+
+  init(inlineData: Data, caption: String) {
+    self.remoteURL = nil
+    self.inlineData = inlineData
+    self.caption = caption
+    self.referer = nil
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -26,21 +41,39 @@ struct ArticleRemoteImage: View {
             .frame(maxWidth: .infinity, minHeight: 120)
         }
       }
-      if !caption.isEmpty, caption != url.lastPathComponent {
+      if !caption.isEmpty, caption != remoteURL?.lastPathComponent {
         Text(caption)
           .font(.caption)
           .foregroundStyle(.secondary)
       }
     }
-    .task(id: url) {
+    .task(id: loadKey) {
       await load()
     }
+  }
+
+  private var loadKey: String {
+    if let inlineData {
+      return "inline-\(inlineData.count)"
+    }
+    return remoteURL?.absoluteString ?? "empty"
   }
 
   private func load() async {
     image = nil
     failed = false
-    if let loaded = await OfficialImageLoader.load(from: url, referer: referer) {
+
+    if let inlineData, let loaded = UIImage(data: inlineData) {
+      image = loaded
+      return
+    }
+
+    guard let remoteURL else {
+      failed = true
+      return
+    }
+
+    if let loaded = await OfficialImageLoader.load(from: remoteURL, referer: referer) {
       image = loaded
     } else {
       failed = true

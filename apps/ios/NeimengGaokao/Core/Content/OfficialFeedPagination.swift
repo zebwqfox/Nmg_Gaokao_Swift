@@ -19,12 +19,17 @@ enum OfficialFeedPagination {
   }
 
   static func totalPages(in html: String) -> Int {
+    if let labeled = html.firstMatch(of: #"共\s*(\d+)\s*页"#)?[safe: 1], let value = Int(labeled) {
+      return max(value, 1)
+    }
+
     let numberedPages = html
       .matches(of: #"index_(\d+)\.html"#)
       .compactMap { match -> Int? in
         guard let value = match[safe: 1] else { return nil }
         return Int(value)
       }
-    return max(numberedPages.max() ?? 1, 1)
+    let maxIndex = numberedPages.max() ?? 1
+    return max(maxIndex, 1)
   }
 }

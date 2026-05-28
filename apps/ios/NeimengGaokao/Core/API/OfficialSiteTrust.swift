@@ -24,6 +24,8 @@ enum OfficialSiteTrust {
     let config = configuration
     config.timeoutIntervalForRequest = 25
     config.timeoutIntervalForResource = 45
+    config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    config.urlCache = nil
     return URLSession(configuration: config, delegate: SessionDelegate(), delegateQueue: nil)
   }
 

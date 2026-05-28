@@ -122,6 +122,7 @@ struct OfficialContentClient {
 
   private func fetchText(_ url: URL) async throws -> String {
     var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
     request.timeoutInterval = 25
     request.setValue("NeimengGaokaoApp/0.1", forHTTPHeaderField: "User-Agent")
     request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")

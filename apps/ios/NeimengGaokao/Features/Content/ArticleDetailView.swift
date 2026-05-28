@@ -120,8 +120,10 @@ struct ArticleDetailView: View {
               .lineSpacing(7)
               .frame(maxWidth: .infinity, alignment: .leading)
               .textSelection(.enabled)
-          case .image(let url, let caption):
+          case .remoteImage(let url, let caption):
             ArticleRemoteImage(url: url, caption: caption, referer: article.originalURL)
+          case .inlineImage(let data, let caption):
+            ArticleRemoteImage(inlineData: data, caption: caption)
           }
         }
       }
@@ -179,7 +181,7 @@ struct ArticleDetailView: View {
       || !article.contentBlocks.isEmpty
     guard force || !hasBody else { return }
 
-    let showSpinner = !hasBody
+    let showSpinner = force || !hasBody
     if showSpinner {
       isLoading = true
     }
@@ -194,7 +196,11 @@ struct ArticleDetailView: View {
       let detail = try await contentClient.fetchArticle(from: article)
       if Task.isCancelled { return }
       if let existing = articles.first(where: { $0.id == detail.id }) {
-        existing.update(from: detail)
+        if force {
+          existing.replaceContent(from: detail)
+        } else {
+          existing.update(from: detail)
+        }
         fetchedDetail = existing
       } else {
         modelContext.insert(detail)

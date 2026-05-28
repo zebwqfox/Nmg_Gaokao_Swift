@@ -18,6 +18,7 @@ struct ContentFeedView: View {
   @State private var errorMessage: String?
   @State private var isSearchMode = false
   @State private var activeSearchTerm: String?
+  @State private var feedLoadGeneration = 0
 
   private var selectedCategory: OfficialCategory {
     contentClient.categories.first(where: { $0.id == selectedCategoryID }) ?? contentClient.categories[0]
@@ -57,7 +58,6 @@ struct ContentFeedView: View {
                 selectedCategoryID = category.id
                 query = ""
                 isSearchMode = false
-                Task { await reloadFeed() }
               } label: {
                 CategoryChip(title: category.title, isSelected: category.id == selectedCategoryID)
               }
@@ -98,6 +98,15 @@ struct ContentFeedView: View {
               }
           }
 
+          if hasMorePages {
+            Color.clear
+              .frame(height: 1)
+              .listRowSeparator(.hidden)
+              .onAppear {
+                loadMoreFromBottom()
+              }
+          }
+
           if isLoadingMore {
             HStack {
               Spacer()
@@ -121,24 +130,17 @@ struct ContentFeedView: View {
       Task { await searchOrFilter() }
     }
     .refreshable {
-      if isSearchMode, let term = activeSearchTerm {
-        query = term
-        await searchOrFilter()
-      } else {
-        await reloadFeed()
-      }
+      await refreshCurrentFeed()
     }
     .toolbar {
       Button {
-        Task { await reloadFeed() }
+        Task { await refreshCurrentFeed() }
       } label: {
         Image(systemName: "arrow.clockwise")
       }
     }
-    .task {
-      if feedItems.isEmpty {
-        await reloadFeed()
-      }
+    .task(id: selectedCategoryID) {
+      await reloadFeed()
     }
   }
 
@@ -154,7 +156,15 @@ struct ContentFeedView: View {
 
   private func loadNextPageIfNeeded(current: CachedArticle) {
     guard hasMorePages, !isRefreshing, !isLoadingMore else { return }
-    guard current.id == regularArticles.last?.id else { return }
+    let regular = regularArticles
+    guard let index = regular.firstIndex(where: { $0.id == current.id }),
+          index >= max(regular.count - 3, 0)
+    else { return }
+    loadMoreFromBottom()
+  }
+
+  private func loadMoreFromBottom() {
+    guard hasMorePages, !isRefreshing, !isLoadingMore else { return }
     Task {
       if isSearchMode {
         await loadNextSearchPage()
@@ -164,36 +174,57 @@ struct ContentFeedView: View {
     }
   }
 
+  private func refreshCurrentFeed() async {
+    if isSearchMode, let term = activeSearchTerm, !term.isEmpty {
+      query = term
+      await searchOrFilter()
+    } else {
+      await reloadFeed()
+    }
+  }
+
   private func reloadFeed() async {
+    feedLoadGeneration += 1
+    let generation = feedLoadGeneration
     isSearchMode = false
     activeSearchTerm = nil
+    query = ""
     nextPage = 1
     hasMorePages = true
     feedItems = []
     errorMessage = nil
     isRefreshing = true
     defer { isRefreshing = false }
-    await loadNextPage()
+    await loadNextPage(generation: generation, replacing: true)
   }
 
-  private func loadNextPage() async {
+  private func loadNextPage(generation: Int? = nil, replacing: Bool = false) async {
+    let generation = generation ?? feedLoadGeneration
+    guard generation == feedLoadGeneration else { return }
     guard hasMorePages, !isLoadingMore else { return }
     isLoadingMore = true
     defer { isLoadingMore = false }
 
+    let pageToLoad = nextPage
     do {
       let result = try await contentClient.fetchFeedPage(
         category: selectedCategory,
-        page: nextPage,
+        page: pageToLoad,
         perPageLimit: 30
       )
+      guard generation == feedLoadGeneration else { return }
       result.articles.forEach(upsert)
       try? modelContext.save()
-      feedItems = mergeArticles(feedItems, with: result.articles)
+      if replacing || pageToLoad == 1 {
+        feedItems = ImportantNewsRanker.ranked(result.articles)
+      } else {
+        feedItems = mergeArticles(feedItems, with: result.articles)
+      }
       hasMorePages = result.hasMore
       nextPage = result.page + 1
       errorMessage = nil
     } catch {
+      guard generation == feedLoadGeneration else { return }
       if feedItems.isEmpty {
         errorMessage = error.localizedDescription
       }
@@ -208,6 +239,8 @@ struct ContentFeedView: View {
       return
     }
 
+    feedLoadGeneration += 1
+    let generation = feedLoadGeneration
     isSearchMode = true
     activeSearchTerm = term
     nextPage = 1
@@ -216,29 +249,38 @@ struct ContentFeedView: View {
     errorMessage = nil
     isRefreshing = true
     defer { isRefreshing = false }
-    await loadNextSearchPage()
+    await loadNextSearchPage(generation: generation, replacing: true)
   }
 
-  private func loadNextSearchPage() async {
+  private func loadNextSearchPage(generation: Int? = nil, replacing: Bool = false) async {
     guard let term = activeSearchTerm, !term.isEmpty else { return }
+    let generation = generation ?? feedLoadGeneration
+    guard generation == feedLoadGeneration else { return }
     guard hasMorePages, !isLoadingMore else { return }
 
     isLoadingMore = true
     defer { isLoadingMore = false }
 
+    let pageToLoad = nextPage
     do {
       let result = try await contentClient.searchOfficialSitePage(
         query: term,
-        page: nextPage,
+        page: pageToLoad,
         perPageLimit: 20
       )
+      guard generation == feedLoadGeneration else { return }
       result.articles.forEach(upsert)
       try? modelContext.save()
-      feedItems = mergeArticles(feedItems, with: result.articles)
+      if replacing || pageToLoad == 1 {
+        feedItems = ImportantNewsRanker.ranked(result.articles)
+      } else {
+        feedItems = mergeArticles(feedItems, with: result.articles)
+      }
       hasMorePages = result.hasMore
       nextPage = result.page + 1
       errorMessage = nil
     } catch {
+      guard generation == feedLoadGeneration else { return }
       if feedItems.isEmpty {
         errorMessage = error.localizedDescription
       }

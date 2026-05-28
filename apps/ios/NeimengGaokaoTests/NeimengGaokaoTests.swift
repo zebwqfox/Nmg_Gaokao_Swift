@@ -122,7 +122,18 @@ final class NeimengGaokaoTests: XCTestCase {
     XCTAssertFalse(parsed.body.contains("function goPAGE"))
     XCTAssertTrue(parsed.body.contains("体育统考成绩"))
     XCTAssertTrue(parsed.contentBlocks.contains {
-      if case .image = $0 { return true }
+      if case .remoteImage = $0 { return true }
+      return false
+    })
+
+    let dataHTML = """
+    <div class="TRS_Editor">
+      <p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" alt="图示" /></p>
+    </div>
+    """
+    let dataParsed = OfficialArticleParser.parse(html: dataHTML, fallback: fallback)
+    XCTAssertTrue(dataParsed.contentBlocks.contains {
+      if case .inlineImage = $0 { return true }
       return false
     })
     XCTAssertFalse(parsed.attachments.contains { $0.fileType == "image" })

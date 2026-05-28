@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 struct ParsedOfficialArticle {
   let title: String
@@ -129,36 +130,44 @@ enum OfficialArticleParser {
   }
 
   private static func parseContentBlocks(html: String, baseURL: URL) -> [ArticleContentBlock] {
-    guard let regex = try? NSRegularExpression(
-      pattern: #"<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>"#,
-      options: [.caseInsensitive, .dotMatchesLineSeparators]
-    ) else {
-      return fallbackTextBlocks(from: html, title: "", baseURL: baseURL)
-    }
-
     var blocks: [ArticleContentBlock] = []
     var cursor = html.startIndex
-    let fullRange = NSRange(html.startIndex..<html.endIndex, in: html)
 
-    for result in regex.matches(in: html, range: fullRange) {
-      guard let tagRange = Range(result.range, in: html),
-            let srcRange = Range(result.range(at: 1), in: html)
-      else { continue }
+    while let imgStart = html.range(
+      of: "<img",
+      options: .caseInsensitive,
+      range: cursor..<html.endIndex
+    )?.lowerBound {
+      appendTextBlock(from: html[cursor..<imgStart], to: &blocks)
+      guard let tagEnd = html.range(of: ">", range: imgStart..<html.endIndex)?.upperBound else { break }
 
-      appendTextBlock(from: html[cursor..<tagRange.lowerBound], to: &blocks)
-      let tagHTML = String(html[tagRange])
-      let src = String(html[srcRange])
-      if let url = resolveImageURL(src, baseURL: baseURL) {
+      let tagHTML = String(html[imgStart..<tagEnd])
+      if let src = extractImageSrc(from: tagHTML) {
         let alt = tagHTML.firstMatch(of: #"alt=["']([^"']*)["']"#)?[safe: 1]?
           .strippingHTML.normalizedWhitespace
-        let caption = alt?.nilIfBlank ?? url.lastPathComponent
-        blocks.append(.image(url: url, caption: caption))
+        if let data = decodeDataURLImage(src) {
+          let caption = alt?.nilIfBlank ?? "正文插图"
+          blocks.append(.inlineImage(data: data, caption: caption))
+        } else if let url = resolveImageURL(src, baseURL: baseURL) {
+          let caption = alt?.nilIfBlank ?? url.lastPathComponent
+          blocks.append(.remoteImage(url: url, caption: caption))
+        }
       }
-      cursor = tagRange.upperBound
+
+      cursor = tagEnd
     }
 
     appendTextBlock(from: html[cursor...], to: &blocks)
-    return blocks
+    return blocks.isEmpty ? fallbackTextBlocks(from: html, title: "", baseURL: baseURL) : blocks
+  }
+
+  private static func extractImageSrc(from tagHTML: String) -> String? {
+    if let quoted = tagHTML.firstMatch(
+      of: #"(?:src|data-src)\s*=\s*["']([^"']+)["']"#
+    )?[safe: 1] {
+      return quoted
+    }
+    return tagHTML.firstMatch(of: #"(?:src|data-src)\s*=\s*([^\s>]+)"#)?[safe: 1]
   }
 
   private static func appendTextBlock(from html: Substring, to blocks: inout [ArticleContentBlock]) {
@@ -189,10 +198,29 @@ enum OfficialArticleParser {
   private static func resolveImageURL(_ src: String, baseURL: URL) -> URL? {
     let trimmed = src.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
+    if trimmed.lowercased().hasPrefix("data:") {
+      return nil
+    }
     if trimmed.hasPrefix("//") {
       return URL(string: "https:\(trimmed)")
     }
     return URL(string: trimmed, relativeTo: baseURL)?.absoluteURL
+  }
+
+  private static func decodeDataURLImage(_ src: String) -> Data? {
+    let trimmed = src.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.lowercased().hasPrefix("data:image") else { return nil }
+    guard let comma = trimmed.firstIndex(of: ",") else { return nil }
+    let metadata = trimmed[..<comma].lowercased()
+    let payload = String(trimmed[trimmed.index(after: comma)...])
+    guard metadata.contains("base64") else { return nil }
+    guard let data = Data(base64Encoded: payload, options: .ignoreUnknownCharacters),
+          !data.isEmpty,
+          UIImage(data: data) != nil
+    else {
+      return nil
+    }
+    return data
   }
 
   private static func parseDocuments(html: String, baseURL: URL) -> [ArticleAttachment] {

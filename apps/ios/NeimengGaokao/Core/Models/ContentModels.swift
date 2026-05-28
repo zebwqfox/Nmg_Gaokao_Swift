@@ -47,7 +47,8 @@ struct ArticleAttachment: Identifiable, Hashable, Codable {
 
 enum ArticleContentBlock: Codable, Hashable {
   case text(String)
-  case image(url: URL, caption: String)
+  case remoteImage(url: URL, caption: String)
+  case inlineImage(data: Data, caption: String)
 }
 
 @Model
@@ -148,6 +149,17 @@ final class CachedArticle {
     if !article.attachmentData.isEmpty {
       attachmentData = article.attachmentData
     }
+    cachedAt = .now
+  }
+
+  func replaceContent(from article: CachedArticle) {
+    title = article.title
+    summary = article.summary
+    body = article.body
+    source = article.source
+    publishedAt = article.publishedAt
+    contentBlocksData = article.contentBlocksData
+    attachmentData = article.attachmentData
     cachedAt = .now
   }
 }

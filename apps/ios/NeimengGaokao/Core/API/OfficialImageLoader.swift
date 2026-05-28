@@ -3,11 +3,15 @@ import UIKit
 
 enum OfficialImageLoader {
   static func load(from url: URL, referer: URL? = nil) async -> UIImage? {
-    let refererURL = referer ?? URL(string: "https://www.nm.zsks.cn/")!
+    let refererCandidates = OfficialURLFallback.candidateURLs(
+      for: referer ?? URL(string: "https://www.nm.zsks.cn/")!
+    )
 
     for candidate in OfficialURLFallback.candidateURLs(for: url) {
-      if let image = try? await fetch(candidate, referer: refererURL) {
-        return image
+      for refererURL in refererCandidates {
+        if let image = try? await fetch(candidate, referer: refererURL) {
+          return image
+        }
       }
     }
     return nil
@@ -15,6 +19,7 @@ enum OfficialImageLoader {
 
   private static func fetch(_ url: URL, referer: URL) async throws -> UIImage {
     var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
     request.timeoutInterval = 25
     request.setValue("NeimengGaokaoApp/0.1", forHTTPHeaderField: "User-Agent")
     request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
