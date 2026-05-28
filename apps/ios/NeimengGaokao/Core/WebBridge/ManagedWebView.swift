@@ -204,14 +204,7 @@ private struct WebViewRepresentable: UIViewRepresentable {
       didReceive challenge: URLAuthenticationChallenge,
       completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
-      if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-         let trust = challenge.protectionSpace.serverTrust,
-         challenge.protectionSpace.host.contains("nm.zsks.cn")
-      {
-        completionHandler(.useCredential, URLCredential(trust: trust))
-        return
-      }
-      completionHandler(.performDefaultHandling, nil)
+      OfficialSiteTrust.accept(challenge: challenge, completionHandler: completionHandler)
     }
 
     private func handleFailure(error: Error, webView: WKWebView) {

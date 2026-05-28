@@ -1,7 +1,7 @@
 import Foundation
 
 struct OfficialStudentClient {
-  var session: URLSession = .shared
+  var session: URLSession = OfficialSiteTrust.makeSession()
   let baseURL = URL(string: "https://www4.nm.zsks.cn/exam/basic-student/api/")!
 
   func login(idNumber: String, password: String, captcha: String) async throws -> OfficialLoginResponse {

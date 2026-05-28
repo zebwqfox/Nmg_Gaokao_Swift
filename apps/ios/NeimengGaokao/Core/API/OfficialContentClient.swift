@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 
 struct OfficialContentClient {
-  var session: URLSession = .shared
+  var session: URLSession = OfficialSiteTrust.makeSession()
 
   let categories: [OfficialCategory] = [
     OfficialCategory(id: "notice", title: "通知公告", kind: .notice, examType: nil, url: URL(string: "https://www.nm.zsks.cn/tzgg/")!),

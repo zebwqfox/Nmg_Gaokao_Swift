@@ -16,6 +16,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.neimenggaokao.client
         INFOPLIST_FILE: NeimengGaokao/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         CODE_SIGN_STYLE: Automatic
