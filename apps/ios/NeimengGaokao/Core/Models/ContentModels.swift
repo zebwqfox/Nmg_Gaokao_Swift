@@ -192,10 +192,10 @@ final class CachedArticle {
     source = article.source ?? source
     publishedAt = article.publishedAt ?? publishedAt
     originalURLString = article.originalURLString
-    if !article.contentBlocksData.isEmpty {
+    if !article.contentBlocks.isEmpty {
       contentBlocksData = article.contentBlocksData
     }
-    if !article.attachmentData.isEmpty {
+    if !article.attachments.isEmpty {
       attachmentData = article.attachmentData
     }
     cachedAt = .now

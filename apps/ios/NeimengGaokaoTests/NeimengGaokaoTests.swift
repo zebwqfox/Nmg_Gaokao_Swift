@@ -73,6 +73,35 @@ final class NeimengGaokaoTests: XCTestCase {
     XCTAssertEqual(OfficialFeedPagination.totalPages(in: linkHTML), 34)
   }
 
+  func testOfficialArticleDateParserReadsDateFromURL() {
+    let url = URL(string: "https://www.nm.zsks.cn/tzgg/202605/t20260527_46396.html")!
+    let date = OfficialArticleDateParser.date(from: url)
+    XCTAssertEqual(DateFormatters.articleDate.string(from: date!), "2026-05-27")
+  }
+
+  func testImportantNewsRankerSortsByDateDescending() {
+    let older = CachedArticle(
+      id: "old",
+      categoryID: "notice",
+      categoryTitle: "通知公告",
+      kind: .notice,
+      title: "2026年高考报名通知",
+      publishedAt: DateFormatters.articleDate.date(from: "2026-05-01"),
+      originalURL: URL(string: "https://www.nm.zsks.cn/tzgg/202605/t20260501_1.html")!
+    )
+    let newer = CachedArticle(
+      id: "new",
+      categoryID: "notice",
+      categoryTitle: "通知公告",
+      kind: .notice,
+      title: "2026年高考温馨提示",
+      publishedAt: DateFormatters.articleDate.date(from: "2026-05-27"),
+      originalURL: URL(string: "https://www.nm.zsks.cn/tzgg/202605/t20260527_2.html")!
+    )
+    let sorted = ImportantNewsRanker.sortedByDate([older, newer])
+    XCTAssertEqual(sorted.map(\.id), ["new", "old"])
+  }
+
   func testImportantNewsRankerPinsGaokaoNotice() {
     let article = CachedArticle(
       id: "a",

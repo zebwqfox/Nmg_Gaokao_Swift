@@ -76,6 +76,17 @@ enum ImportantNewsRanker {
     return ranked(articles).filter { !pinnedIDs.contains($0.id) }
   }
 
+  static func sortedByDate(_ articles: [CachedArticle]) -> [CachedArticle] {
+    articles.sorted { lhs, rhs in
+      let left = OfficialArticleDateParser.sortDate(for: lhs)
+      let right = OfficialArticleDateParser.sortDate(for: rhs)
+      if left != right {
+        return left > right
+      }
+      return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+    }
+  }
+
   static func matchedKeywords(in article: CachedArticle) -> [String] {
     let text = "\(article.title) \(article.summary)"
     return keywordWeights

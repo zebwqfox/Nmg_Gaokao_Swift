@@ -22,10 +22,7 @@ struct OfficialContentClient {
       url: resolvedURL
     )
     let totalPages = OfficialFeedPagination.totalPages(in: html)
-    let articles = rankIfNeeded(
-      parseListPage(html: html, category: resolvedCategory, limit: perPageLimit),
-      categoryID: resolvedCategory.id
-    )
+    let articles = parseListPage(html: html, category: resolvedCategory, limit: perPageLimit)
     return OfficialFeedPageResult(
       articles: articles,
       page: page,
@@ -67,10 +64,7 @@ struct OfficialContentClient {
     let (html, resolvedURL) = try await fetchTextWithFallback(pageURL)
     let category = OfficialCategory(id: "search", title: "搜索", kind: .latest, examType: nil, url: resolvedURL)
     let totalPages = OfficialSiteSearch.totalPages(in: html)
-    let articles = rankIfNeeded(
-      parseSearchResults(html: html, category: category, limit: perPageLimit),
-      categoryID: category.id
-    )
+    let articles = parseSearchResults(html: html, category: category, limit: perPageLimit)
     return OfficialFeedPageResult(
       articles: articles,
       page: page,
@@ -97,11 +91,6 @@ struct OfficialContentClient {
         cachedAt: article.cachedAt
       )
     }
-  }
-
-  private func rankIfNeeded(_ articles: [CachedArticle], categoryID: String) -> [CachedArticle] {
-    guard ["notice", "latest-news", "search"].contains(categoryID) else { return articles }
-    return ImportantNewsRanker.ranked(articles)
   }
 
   private func fetchTextWithFallback(_ url: URL) async throws -> (text: String, resolvedURL: URL) {
@@ -176,7 +165,10 @@ struct OfficialContentClient {
 
       let rawTitle = match[safe: 2]?.nilIfBlank ?? match[safe: 3] ?? ""
       let title = rawTitle.strippingHTML.normalizedWhitespace
-      let date = nearbyDate(for: match.fullMatch, in: scopedHTML)
+      let date = OfficialArticleDateParser.resolvedDate(
+        listDate: nearbyDate(for: match.fullMatch, in: scopedHTML),
+        url: url
+      )
       guard OfficialArticleListFilter.shouldKeepListLink(title: title, url: url, hasNearbyDate: date != nil),
             seen.insert(url.absoluteString).inserted
       else {

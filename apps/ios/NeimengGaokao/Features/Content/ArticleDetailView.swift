@@ -1,4 +1,3 @@
-import SwiftData
 import SwiftUI
 
 struct ArticleDetailView: View {
@@ -6,16 +5,13 @@ struct ArticleDetailView: View {
 
   @Environment(RouterPath.self) private var router
   @Environment(\.contentClient) private var contentClient
-  @Environment(\.modelContext) private var modelContext
+  @Environment(\.openURL) private var openURL
 
-  @Query private var articles: [CachedArticle]
-  @State private var fetchedDetail: CachedArticle?
+  @State private var article: CachedArticle?
   @State private var isLoading = false
   @State private var errorMessage: String?
-
-  private var article: CachedArticle? {
-    fetchedDetail ?? articles.first(where: { $0.id == articleID })
-  }
+  @State private var isFavorite = false
+  @State private var attachmentError: String?
 
   private var documentAttachments: [ArticleAttachment] {
     article?.documentAttachments ?? []
@@ -50,6 +46,12 @@ struct ArticleDetailView: View {
                 .foregroundStyle(.red)
             }
 
+            if let attachmentError {
+              Text(attachmentError)
+                .font(.footnote)
+                .foregroundStyle(.orange)
+            }
+
             articleBody(for: article)
               .animation(.easeOut(duration: 0.25), value: article.contentBlocks.count)
               .animation(.easeOut(duration: 0.25), value: article.body.count)
@@ -60,7 +62,7 @@ struct ArticleDetailView: View {
                   .font(.headline)
                 ForEach(documentAttachments) { attachment in
                   Button {
-                    router.navigate(to: .web(title: attachment.title, url: attachment.url))
+                    openAttachment(attachment)
                   } label: {
                     HStack(spacing: 12) {
                       Image(systemName: attachment.systemImageName)
@@ -74,7 +76,7 @@ struct ArticleDetailView: View {
                           .foregroundStyle(.secondary)
                       }
                       Spacer()
-                      Image(systemName: "chevron.right")
+                      Image(systemName: "arrow.up.forward.square")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.tertiary)
                     }
@@ -94,9 +96,9 @@ struct ArticleDetailView: View {
         .toolbar {
           ToolbarItemGroup(placement: .topBarTrailing) {
             Button {
-              toggleFavorite(article)
+              isFavorite = FavoriteArticles.toggle(articleID)
             } label: {
-              Image(systemName: article.isFavorite ? "star.fill" : "star")
+              Image(systemName: isFavorite ? "star.fill" : "star")
             }
             Button {
               router.navigate(to: .web(title: "原文", url: article.originalURL))
@@ -106,11 +108,18 @@ struct ArticleDetailView: View {
           }
         }
         .refreshable {
-          await loadDetailIfNeeded(article, force: true)
+          await loadDetailIfNeeded(force: true)
         }
         .task(id: articleID) {
-          await loadDetailIfNeeded(article, force: false)
+          isFavorite = FavoriteArticles.contains(articleID)
+          if article == nil {
+            article = ArticleSessionCache.get(articleID)
+          }
+          await loadDetailIfNeeded(force: false)
         }
+      } else if isLoading {
+        ProgressView("正在加载文章")
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         ContentUnavailableView("找不到文章", systemImage: "doc.text.magnifyingglass")
       }
@@ -196,9 +205,15 @@ struct ArticleDetailView: View {
     .nativeGlassPanel(cornerRadius: 16, tint: .blue.opacity(0.05))
   }
 
-  private func loadDetailIfNeeded(_ article: CachedArticle, force: Bool) async {
-    let hasBody = !article.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      || !article.contentBlocks.isEmpty
+  private func loadDetailIfNeeded(force: Bool) async {
+    guard let current = article ?? ArticleSessionCache.get(articleID) else {
+      errorMessage = "未找到这篇文章，请返回列表后重试。"
+      return
+    }
+
+    article = current
+    let hasBody = !current.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || !current.contentBlocks.isEmpty
     guard force || !hasBody else { return }
 
     isLoading = true
@@ -206,24 +221,12 @@ struct ArticleDetailView: View {
     defer { isLoading = false }
 
     do {
-      let detail = try await contentClient.fetchArticle(from: article)
+      let detail = try await contentClient.fetchArticle(from: current)
       if Task.isCancelled { return }
-      if let existing = articles.first(where: { $0.id == detail.id }) {
-        if force {
-          existing.replaceContent(from: detail)
-        } else {
-          existing.update(from: detail)
-        }
-        withAnimation(.easeOut(duration: 0.25)) {
-          fetchedDetail = existing
-        }
-      } else {
-        modelContext.insert(detail)
-        withAnimation(.easeOut(duration: 0.25)) {
-          fetchedDetail = detail
-        }
+      ArticleSessionCache.replace(detail)
+      withAnimation(.easeOut(duration: 0.25)) {
+        article = detail
       }
-      try? modelContext.save()
     } catch is CancellationError {
       return
     } catch {
@@ -231,8 +234,12 @@ struct ArticleDetailView: View {
     }
   }
 
-  private func toggleFavorite(_ article: CachedArticle) {
-    article.isFavorite.toggle()
-    try? modelContext.save()
+  private func openAttachment(_ attachment: ArticleAttachment) {
+    attachmentError = nil
+    openURL(attachment.url) { accepted in
+      if !accepted {
+        attachmentError = "无法打开附件，请稍后重试或使用原文链接。"
+      }
+    }
   }
 }

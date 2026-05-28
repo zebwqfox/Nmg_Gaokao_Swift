@@ -55,8 +55,9 @@ struct ManagedWebView: View {
     }
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar(.hidden, for: .tabBar)
     .toolbar {
-      ToolbarItemGroup(placement: .bottomBar) {
+      ToolbarItemGroup(placement: .topBarTrailing) {
         Button {
           state.webView?.goBack()
         } label: {
@@ -71,19 +72,15 @@ struct ManagedWebView: View {
         }
         .disabled(!state.canGoForward)
 
-        Spacer()
-
         Button {
           state.webView?.reload()
         } label: {
           Image(systemName: "arrow.clockwise")
         }
-        .buttonStyle(.glass)
 
         ShareLink(item: state.webView?.url ?? url) {
           Image(systemName: "square.and.arrow.up")
         }
-        .buttonStyle(.glass)
       }
     }
   }

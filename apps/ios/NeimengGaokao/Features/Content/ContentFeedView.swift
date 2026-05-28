@@ -1,12 +1,8 @@
-import SwiftData
 import SwiftUI
 
 struct ContentFeedView: View {
   @Environment(RouterPath.self) private var router
   @Environment(\.contentClient) private var contentClient
-  @Environment(\.modelContext) private var modelContext
-
-  @Query(sort: \CachedArticle.cachedAt, order: .reverse) private var cachedArticles: [CachedArticle]
 
   @State private var selectedCategoryID = "notice"
   @State private var query = ""
@@ -22,6 +18,7 @@ struct ContentFeedView: View {
   @State private var searchTask: Task<Void, Never>?
   @State private var loadMoreTask: Task<Void, Never>?
   @State private var feedHeadIDs: Set<String> = []
+  @State private var loadedCategoryID: String?
 
   private var trimmedQuery: String {
     query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -40,7 +37,9 @@ struct ContentFeedView: View {
   }
 
   private var pinnedArticles: [CachedArticle] {
-    feedItems.filter { feedHeadIDs.contains($0.id) && ImportantNewsRanker.isPinned($0) }
+    ImportantNewsRanker.sortedByDate(
+      feedItems.filter { feedHeadIDs.contains($0.id) && ImportantNewsRanker.isPinned($0) }
+    )
   }
 
   private var regularArticles: [CachedArticle] {
@@ -121,7 +120,6 @@ struct ContentFeedView: View {
           FeedLoadMoreFooter(isLoading: isLoadingMore, hasMore: hasMorePages)
             .listRowSeparator(.hidden)
         }
-        .animation(.easeInOut(duration: 0.24), value: regularArticles.map(\.id))
       }
     }
     .navigationTitle("资讯")
@@ -144,6 +142,10 @@ struct ContentFeedView: View {
       }
     }
     .task(id: selectedCategoryID) {
+      if loadedCategoryID == selectedCategoryID, !feedItems.isEmpty {
+        return
+      }
+      loadedCategoryID = selectedCategoryID
       await reloadFeed()
     }
   }
@@ -151,6 +153,7 @@ struct ContentFeedView: View {
   @ViewBuilder
   private func articleRow(_ article: CachedArticle, pinned: Bool) -> some View {
     Button {
+      ArticleSessionCache.store(article)
       router.navigate(to: .article(id: article.id))
     } label: {
       ArticleListRow(article: article, pinned: pinned)
@@ -240,10 +243,9 @@ struct ContentFeedView: View {
       )
       guard generation == feedLoadGeneration else { return }
       if replacing || pageToLoad == 1 {
-        let ranked = ImportantNewsRanker.ranked(result.articles)
         withAnimation(.easeInOut(duration: 0.24)) {
-          feedItems = ranked
-          feedHeadIDs = Set(ranked.map(\.id))
+          feedItems = result.articles
+          feedHeadIDs = Set(result.articles.map(\.id))
         }
       } else {
         withAnimation(.easeInOut(duration: 0.24)) {
@@ -253,7 +255,7 @@ struct ContentFeedView: View {
       hasMorePages = result.hasMore
       nextPage = result.page + 1
       errorMessage = nil
-      persistArticles(result.articles)
+      result.articles.forEach(ArticleSessionCache.store)
     } catch {
       guard generation == feedLoadGeneration else { return }
       if feedItems.isEmpty {
@@ -306,10 +308,9 @@ struct ContentFeedView: View {
       )
       guard generation == feedLoadGeneration else { return }
       if replacing || pageToLoad == 1 {
-        let ranked = ImportantNewsRanker.ranked(result.articles)
         withAnimation(.easeInOut(duration: 0.24)) {
-          feedItems = ranked
-          feedHeadIDs = Set(ranked.map(\.id))
+          feedItems = ImportantNewsRanker.sortedByDate(result.articles)
+          feedHeadIDs = Set(result.articles.map(\.id))
         }
       } else {
         withAnimation(.easeInOut(duration: 0.24)) {
@@ -319,7 +320,7 @@ struct ContentFeedView: View {
       hasMorePages = result.hasMore
       nextPage = result.page + 1
       errorMessage = nil
-      persistArticles(result.articles)
+      result.articles.forEach(ArticleSessionCache.store)
     } catch {
       guard generation == feedLoadGeneration else { return }
       if feedItems.isEmpty {
@@ -336,21 +337,6 @@ struct ContentFeedView: View {
       merged.append(article)
     }
     return merged
-  }
-
-  private func persistArticles(_ articles: [CachedArticle]) {
-    Task(priority: .utility) { @MainActor in
-      articles.forEach(upsert)
-      try? modelContext.save()
-    }
-  }
-
-  private func upsert(_ article: CachedArticle) {
-    if let existing = cachedArticles.first(where: { $0.id == article.id }) {
-      existing.update(from: article)
-    } else {
-      modelContext.insert(article)
-    }
   }
 }
 
@@ -418,7 +404,7 @@ private struct ArticleListRow: View {
       }
       HStack(spacing: 8) {
         Text(article.categoryTitle)
-        if let publishedAt = article.publishedAt {
+        if let publishedAt = article.publishedAt ?? OfficialArticleDateParser.date(from: article.originalURL) {
           Text(DateFormatters.displayDate.string(from: publishedAt))
         }
       }

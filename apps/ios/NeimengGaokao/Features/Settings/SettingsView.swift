@@ -8,7 +8,6 @@ struct SettingsView: View {
   @Environment(\.modelContext) private var modelContext
 
   @Query private var candidates: [CandidateProfile]
-  @Query private var articles: [CachedArticle]
 
   @State private var credentialStatus = "未检查"
 
@@ -50,16 +49,15 @@ struct SettingsView: View {
 
       Section("本地数据") {
         HStack {
-          Label("已缓存资讯", systemImage: "newspaper")
+          Label("收藏资讯", systemImage: "star")
           Spacer()
-          Text("\(articles.count)")
+          Text("\(FavoriteArticles.count)")
             .foregroundStyle(.secondary)
         }
         Button(role: .destructive) {
-          articles.forEach(modelContext.delete)
-          try? modelContext.save()
+          FavoriteArticles.clearAll()
         } label: {
-          Label("清除资讯缓存", systemImage: "trash")
+          Label("清除收藏", systemImage: "trash")
         }
       }
     }

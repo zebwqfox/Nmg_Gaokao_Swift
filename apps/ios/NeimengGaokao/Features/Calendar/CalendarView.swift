@@ -1,24 +1,25 @@
-import SwiftData
 import SwiftUI
 
 struct CalendarView: View {
   @Environment(RouterPath.self) private var router
-  @Query(sort: \CachedArticle.cachedAt, order: .reverse) private var articles: [CachedArticle]
 
   private var events: [PolicyEvent] {
-    articles
+    ArticleSessionCache.allArticles
       .compactMap(PolicyEvent.init(article:))
-      .sorted { $0.date < $1.date }
+      .sorted { $0.date > $1.date }
   }
 
   var body: some View {
     List {
       if events.isEmpty {
-        ContentUnavailableView("暂无时间节点", systemImage: "calendar.badge.exclamationmark", description: Text("资讯同步后，App 会从政策和公告标题里整理报名、缴费、打印、查询等关键日期。"))
+        ContentUnavailableView("暂无时间节点", systemImage: "calendar.badge.exclamationmark", description: Text("浏览资讯后，App 会从公告标题里整理报名、缴费、打印、查询等关键日期。"))
       } else {
         Section("从公告中整理") {
           ForEach(events) { event in
             Button {
+              if let article = ArticleSessionCache.get(event.articleID) {
+                ArticleSessionCache.store(article)
+              }
               router.navigate(to: .article(id: event.articleID))
             } label: {
               HStack(spacing: 12) {
