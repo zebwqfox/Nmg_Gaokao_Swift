@@ -1,0 +1,46 @@
+name: NeimengGaokao
+options:
+  minimumXcodeGenVersion: 2.40.0
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    SWIFT_VERSION: "5.0"
+targets:
+  NeimengGaokao:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - NeimengGaokao
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.neimenggaokao.client
+        INFOPLIST_FILE: NeimengGaokao/Resources/Info.plist
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SUPPORTS_MACCATALYST: "NO"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: "NO"
+  NeimengGaokaoTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - NeimengGaokaoTests
+    dependencies:
+      - target: NeimengGaokao
+schemes:
+  NeimengGaokao:
+    build:
+      targets:
+        NeimengGaokao: all
+        NeimengGaokaoTests: [test]
+    test:
+      config: Debug
+      targets:
+        - NeimengGaokaoTests
+    run:
+      config: Debug
+    archive:
+      config: Release

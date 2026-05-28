@@ -1,0 +1,141 @@
+name: iOS 26 UI Unsigned IPA Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios26ui-unsigned-ipa-build.yml"
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios26ui-unsigned-ipa-build.yml"
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: apps/ios
+  PROJECT_PATH: NeimengGaokao.xcodeproj
+  SCHEME: NeimengGaokao
+  APP_NAME: NeimengGaokao
+  CONFIGURATION: Release
+  DERIVED_DATA: build/DerivedData
+  APP_PATH: build/DerivedData/Build/Products/Release-iphoneos/NeimengGaokao.app
+  IPA_PATH: build/NeimengGaokao-iOS26UI-unsigned.ipa
+
+jobs:
+  build-ios26ui-unsigned-ipa:
+    name: Build iOS 26 UI unsigned IPA
+    runs-on: macos-26
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: List available Xcode versions
+        run: ls /Applications | grep Xcode || true
+
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          if [ -d /Applications/Xcode_26.3.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.3.app
+          elif ls -d /Applications/Xcode_26*.app >/dev/null 2>&1; then
+            latest_xcode_26="$(ls -dt /Applications/Xcode_26*.app | head -n 1)"
+            sudo xcode-select -s "$latest_xcode_26"
+          else
+            echo "Xcode 26 is required because this app targets iOS 26 UI only."
+            ls /Applications | grep Xcode || true
+            exit 1
+          fi
+
+      - name: Verify Xcode 26
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild -version | grep -E '^Xcode 26\.'
+          xcrun simctl list runtimes | grep -E 'iOS 26|iOS' | head -20 || true
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          test -d "$PROJECT_PATH"
+          xcodebuild -list -project "$PROJECT_PATH"
+
+      - name: Build unit tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build iOS device app without code signing
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build
+
+      - name: Verify app bundle
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          test -d "$APP_PATH"
+          file "$APP_PATH/$APP_NAME"
+          xcrun lipo -info "$APP_PATH/$APP_NAME"
+          du -sh "$APP_PATH"
+
+      - name: Package unsigned IPA
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          rm -rf build/Payload "$IPA_PATH"
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          (cd build && zip -qry "$(basename "$IPA_PATH")" Payload)
+          test -f "$IPA_PATH"
+
+      - name: Verify IPA
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          ls -lh "$IPA_PATH"
+          unzip -l "$IPA_PATH" | head -30
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neimeng-gaokao-ios26ui-unsigned-ipa
+          path: apps/ios/${{ env.IPA_PATH }}
+          if-no-files-found: error

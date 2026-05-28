@@ -1,0 +1,7 @@
+.DS_Store
+DerivedData/
+build/
+apps/ios/build/
+apps/ios/NeimengGaokao.xcodeproj/
+*.xcuserdata/
+*.ipa
