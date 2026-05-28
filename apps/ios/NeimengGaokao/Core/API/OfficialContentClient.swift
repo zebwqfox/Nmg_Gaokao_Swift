@@ -47,7 +47,10 @@ struct OfficialContentClient {
       return listItem
     }
     let (html, _) = try await fetchTextWithFallback(listItem.originalURL)
-    return parseDetailPage(html: html, fallback: listItem)
+    let fallback = listItem
+    return await Task.detached(priority: .userInitiated) {
+      Self.parseDetailPage(html: html, fallback: fallback)
+    }.value
   }
 
   func searchOfficialSite(query: String) async throws -> [CachedArticle] {
@@ -119,6 +122,7 @@ struct OfficialContentClient {
 
   private func fetchText(_ url: URL) async throws -> String {
     var request = URLRequest(url: url)
+    request.timeoutInterval = 25
     request.setValue("NeimengGaokaoApp/0.1", forHTTPHeaderField: "User-Agent")
     request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
     let (data, response) = try await session.data(for: request)
@@ -199,7 +203,7 @@ struct OfficialContentClient {
     return items
   }
 
-  private func parseDetailPage(html: String, fallback: CachedArticle) -> CachedArticle {
+  private static func parseDetailPage(html: String, fallback: CachedArticle) -> CachedArticle {
     let parsed = OfficialArticleParser.parse(html: html, fallback: fallback)
 
     return CachedArticle(

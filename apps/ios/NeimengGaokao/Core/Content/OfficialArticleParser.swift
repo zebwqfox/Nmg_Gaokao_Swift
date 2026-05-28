@@ -9,6 +9,8 @@ struct ParsedOfficialArticle {
 }
 
 enum OfficialArticleParser {
+  private static let maxContentBlockLength = 300_000
+
   static func parse(html: String, fallback: CachedArticle) -> ParsedOfficialArticle {
     let sanitized = stripScriptsAndStyles(from: html)
     let title = extractTitle(from: sanitized) ?? fallback.title
@@ -76,22 +78,37 @@ enum OfficialArticleParser {
     var depth = 0
 
     while index < html.endIndex {
+      if html.distance(from: start, to: index) > maxContentBlockLength {
+        return nil
+      }
+
       let remainder = html[index...]
-      if remainder.lowercased().hasPrefix("<div") {
+      let openRange = remainder.range(of: "<div", options: .caseInsensitive)
+      let closeRange = remainder.range(of: "</div>", options: .caseInsensitive)
+
+      let useOpen: Bool
+      switch (openRange, closeRange) {
+      case let (open?, close?):
+        useOpen = open.lowerBound <= close.lowerBound
+      case (.some, .none):
+        useOpen = true
+      case (.none, .some):
+        useOpen = false
+      case (.none, .none):
+        return nil
+      }
+
+      if useOpen, let openRange {
         depth += 1
-        index = html.index(index, offsetBy: 4, limitedBy: html.endIndex) ?? html.endIndex
-        continue
-      }
-      if remainder.lowercased().hasPrefix("</div>") {
+        index = openRange.upperBound
+      } else if let closeRange {
         depth -= 1
-        let end = html.index(index, offsetBy: 6, limitedBy: html.endIndex) ?? html.endIndex
+        index = closeRange.upperBound
         if depth == 0 {
-          return String(html[start..<end])
+          let block = String(html[start..<index])
+          return block.count <= maxContentBlockLength ? block : nil
         }
-        index = end
-        continue
       }
-      index = html.index(after: index)
     }
     return nil
   }

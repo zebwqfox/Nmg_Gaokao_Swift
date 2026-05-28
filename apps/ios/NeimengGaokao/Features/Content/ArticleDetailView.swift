@@ -33,6 +33,10 @@ struct ArticleDetailView: View {
       .filter { !$0.isEmpty }
   }
 
+  private var showsBodyLoading: Bool {
+    isLoading && (article?.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+  }
+
   var body: some View {
     Group {
       if let article {
@@ -40,7 +44,7 @@ struct ArticleDetailView: View {
           VStack(alignment: .leading, spacing: 20) {
             header(for: article)
 
-            if isLoading {
+            if showsBodyLoading {
               ProgressView("正在读取正文")
                 .frame(maxWidth: .infinity, minHeight: 80)
             }
@@ -129,10 +133,10 @@ struct ArticleDetailView: View {
           }
         }
         .refreshable {
-          await loadDetailIfNeeded(article)
+          await loadDetailIfNeeded(article, force: true)
         }
-        .task(id: article.id) {
-          await loadDetailIfNeeded(article)
+        .task(id: articleID) {
+          await loadDetailIfNeeded(article, force: false)
         }
       } else {
         ContentUnavailableView("找不到文章", systemImage: "doc.text.magnifyingglass")
@@ -164,21 +168,34 @@ struct ArticleDetailView: View {
     .nativeGlassPanel(cornerRadius: 16, tint: .blue.opacity(0.05))
   }
 
-  private func loadDetailIfNeeded(_ article: CachedArticle) async {
-    guard !isLoading else { return }
-    isLoading = true
+  private func loadDetailIfNeeded(_ article: CachedArticle, force: Bool) async {
+    let hasBody = !article.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    guard force || !hasBody else { return }
+
+    let showSpinner = !hasBody
+    if showSpinner {
+      isLoading = true
+    }
     errorMessage = nil
-    defer { isLoading = false }
+    defer {
+      if showSpinner {
+        isLoading = false
+      }
+    }
 
     do {
       let detail = try await contentClient.fetchArticle(from: article)
+      if Task.isCancelled { return }
       if let existing = articles.first(where: { $0.id == detail.id }) {
         existing.update(from: detail)
+        fetchedDetail = existing
       } else {
         modelContext.insert(detail)
+        fetchedDetail = detail
       }
       try? modelContext.save()
-      fetchedDetail = detail
+    } catch is CancellationError {
+      return
     } catch {
       errorMessage = error.localizedDescription
     }

@@ -22,6 +22,8 @@ enum OfficialSiteTrust {
 
   static func makeSession(configuration: URLSessionConfiguration = .default) -> URLSession {
     let config = configuration
+    config.timeoutIntervalForRequest = 25
+    config.timeoutIntervalForResource = 45
     return URLSession(configuration: config, delegate: SessionDelegate(), delegateQueue: nil)
   }
 
