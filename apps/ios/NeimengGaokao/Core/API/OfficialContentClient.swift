@@ -5,22 +5,15 @@ import Foundation
 struct OfficialContentClient {
   var session: URLSession = OfficialSiteTrust.makeSession()
 
+  /// 资讯页仅抓取官网「通知公告」「最新要闻」两个栏目。
   let categories: [OfficialCategory] = [
     OfficialCategory(id: "notice", title: "通知公告", kind: .notice, examType: nil, url: URL(string: "https://www.nm.zsks.cn/tzgg/")!),
-    OfficialCategory(id: "latest-news", title: "最新要闻", kind: .news, examType: nil, url: URL(string: "https://www.nm.zsks.cn/zxyw/")!),
-    OfficialCategory(id: "home", title: "首页最新", kind: .latest, examType: nil, url: URL(string: "https://www.nm.zsks.cn/")!),
-    OfficialCategory(id: "gaokao-notice", title: "高考公告", kind: .notice, examType: "高考", url: URL(string: "https://www.nm.zsks.cn/kszs/ptgk/ggl/")!),
-    OfficialCategory(id: "gaokao-policy", title: "高考政策", kind: .policy, examType: "高考", url: URL(string: "https://www.nm.zsks.cn/kszs/ptgk/zcfg/")!),
-    OfficialCategory(id: "policies", title: "政策法规", kind: .policy, examType: nil, url: URL(string: "https://www.nm.zsks.cn/zszc1/")!),
-    OfficialCategory(id: "services", title: "服务平台", kind: .service, examType: nil, url: URL(string: "https://www.nm.zsks.cn/fwpt/")!),
-    OfficialCategory(id: "zsb", title: "专升本", kind: .notice, examType: "专升本", url: URL(string: "https://www.nm.zsks.cn/kszs/zsbks/")!),
-    OfficialCategory(id: "xuekao", title: "学考", kind: .notice, examType: "学考", url: URL(string: "https://www.nm.zsks.cn/kszs/xk/")!),
-    OfficialCategory(id: "gzdz-topic", title: "高职单招专题", kind: .topic, examType: "高职单招", url: URL(string: "https://www.nm.zsks.cn/ztzl/2026gzdz/")!),
-    OfficialCategory(id: "xuekao-topic", title: "学考报名专题", kind: .topic, examType: "学考", url: URL(string: "https://www.nm.zsks.cn/ztzl/xkxkbmzl/")!)
+    OfficialCategory(id: "latest-news", title: "最新要闻", kind: .news, examType: nil, url: URL(string: "https://www.nm.zsks.cn/zxyw/")!)
   ]
 
-  func fetchFeed(category: OfficialCategory, limit: Int = 30) async throws -> [CachedArticle] {
-    let (html, resolvedURL) = try await fetchTextWithFallback(category.url)
+  func fetchFeedPage(category: OfficialCategory, page: Int, perPageLimit: Int = 30) async throws -> OfficialFeedPageResult {
+    let pageURL = OfficialFeedPagination.pageURL(for: category, page: page)
+    let (html, resolvedURL) = try await fetchTextWithFallback(pageURL)
     let resolvedCategory = OfficialCategory(
       id: category.id,
       title: category.title,
@@ -28,8 +21,21 @@ struct OfficialContentClient {
       examType: category.examType,
       url: resolvedURL
     )
-    let articles = parseListPage(html: html, category: resolvedCategory, limit: limit)
-    return rankIfNeeded(articles, categoryID: resolvedCategory.id)
+    let totalPages = OfficialFeedPagination.totalPages(in: html)
+    let articles = rankIfNeeded(
+      parseListPage(html: html, category: resolvedCategory, limit: perPageLimit),
+      categoryID: resolvedCategory.id
+    )
+    return OfficialFeedPageResult(
+      articles: articles,
+      page: page,
+      totalPages: totalPages,
+      hasMore: page < totalPages && !articles.isEmpty
+    )
+  }
+
+  func fetchFeed(category: OfficialCategory, limit: Int = 30) async throws -> [CachedArticle] {
+    try await fetchFeedPage(category: category, page: 1, perPageLimit: limit).articles
   }
 
   func rankedFeed(category: OfficialCategory, limit: Int = 40) async throws -> [CachedArticle] {
@@ -45,16 +51,53 @@ struct OfficialContentClient {
   }
 
   func searchOfficialSite(query: String) async throws -> [CachedArticle] {
-    var components = URLComponents(string: "https://www.nm.zsks.cn/web/search/375")!
-    components.queryItems = [URLQueryItem(name: "content", value: query)]
-    let (html, resolvedURL) = try await fetchTextWithFallback(components.url!)
+    try await searchOfficialSitePage(query: query, page: 1).articles
+  }
+
+  func searchOfficialSitePage(query: String, page: Int, perPageLimit: Int = 20) async throws -> OfficialFeedPageResult {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      return OfficialFeedPageResult(articles: [], page: 1, totalPages: 1, hasMore: false)
+    }
+
+    let pageURL = OfficialSiteSearch.pageURL(query: trimmed, page: page)
+    let (html, resolvedURL) = try await fetchTextWithFallback(pageURL)
     let category = OfficialCategory(id: "search", title: "搜索", kind: .latest, examType: nil, url: resolvedURL)
-    let articles = parseListPage(html: html, category: category, limit: 50)
-    return rankIfNeeded(articles, categoryID: category.id)
+    let totalPages = OfficialSiteSearch.totalPages(in: html)
+    let articles = rankIfNeeded(
+      parseSearchResults(html: html, category: category, limit: perPageLimit),
+      categoryID: category.id
+    )
+    return OfficialFeedPageResult(
+      articles: articles,
+      page: page,
+      totalPages: totalPages,
+      hasMore: page < totalPages && !articles.isEmpty
+    )
+  }
+
+  private func parseSearchResults(html: String, category: OfficialCategory, limit: Int) -> [CachedArticle] {
+    parseListPage(html: html, category: category, limit: limit).map { article in
+      CachedArticle(
+        id: article.id,
+        categoryID: article.categoryID,
+        categoryTitle: article.categoryTitle,
+        kind: article.kind,
+        title: OfficialSiteSearch.cleanedTitle(article.title),
+        summary: OfficialSiteSearch.cleanedTitle(article.summary),
+        body: article.body,
+        source: article.source,
+        publishedAt: article.publishedAt,
+        originalURL: article.originalURL,
+        attachments: article.attachments,
+        isFavorite: article.isFavorite,
+        cachedAt: article.cachedAt
+      )
+    }
   }
 
   private func rankIfNeeded(_ articles: [CachedArticle], categoryID: String) -> [CachedArticle] {
-    guard ["notice", "latest-news"].contains(categoryID) else { return articles }
+    guard ["notice", "latest-news", "search"].contains(categoryID) else { return articles }
     return ImportantNewsRanker.ranked(articles)
   }
 
@@ -115,8 +158,9 @@ struct OfficialContentClient {
     category: OfficialCategory,
     limit: Int
   ) -> [CachedArticle] {
+    let scopedHTML = OfficialArticleListFilter.listContentHTML(from: html)
     let linkRegex = #"<a[^>]+href=["']([^"']+)["'][^>]*(?:title=["']([^"']*)["'])?[^>]*>(.*?)</a>"#
-    let matches = html.matches(of: linkRegex)
+    let matches = scopedHTML.matches(of: linkRegex)
     var items: [CachedArticle] = []
     var seen = Set<String>()
 
@@ -127,11 +171,12 @@ struct OfficialContentClient {
 
       let rawTitle = match[safe: 2]?.nilIfBlank ?? match[safe: 3] ?? ""
       let title = rawTitle.strippingHTML.normalizedWhitespace
-      guard shouldKeepListLink(title: title, url: url), seen.insert(url.absoluteString).inserted else {
+      let date = nearbyDate(for: match.fullMatch, in: scopedHTML)
+      guard OfficialArticleListFilter.shouldKeepListLink(title: title, url: url, hasNearbyDate: date != nil),
+            seen.insert(url.absoluteString).inserted
+      else {
         continue
       }
-
-      let date = nearbyDate(for: match.fullMatch, in: html)
       items.append(CachedArticle(
         id: stableID(url.absoluteString),
         categoryID: category.id,
@@ -155,42 +200,22 @@ struct OfficialContentClient {
   }
 
   private func parseDetailPage(html: String, fallback: CachedArticle) -> CachedArticle {
-    let title = html.firstMatch(of: #"<h1[^>]*>(.*?)</h1>"#)?[safe: 1]?.strippingHTML.normalizedWhitespace
-      ?? html.firstMatch(of: #"<div[^>]+class=["'][^"']*(?:title|bt|article-title)[^"']*["'][^>]*>(.*?)</div>"#)?[safe: 1]?.strippingHTML.normalizedWhitespace
-      ?? fallback.title
-    let published = html.firstMatch(of: #"发布时间[:：]\s*([0-9]{4}-[0-9]{2}-[0-9]{2}(?:\s+[0-9]{2}:[0-9]{2})?)"#)?[safe: 1]
-      .flatMap { DateFormatters.articleDateTimeOrDate($0) }
-      ?? fallback.publishedAt
-    let source = html.firstMatch(of: #"来源[:：]\s*([^<\n]+)"#)?[safe: 1]?.strippingHTML.normalizedWhitespace
-    let attachments = parseAttachments(html: html, baseURL: fallback.originalURL)
-    let bodyHTML = html.firstMatch(of: #"<div[^>]+class=["'][^"']*(?:content|article|TRS_Editor)[^"']*["'][^>]*>(.*?)</div>\s*(?:<div|</body)"#)?[safe: 1] ?? html
-    let body = trimChrome(from: bodyHTML.htmlToPlainText, title: title)
+    let parsed = OfficialArticleParser.parse(html: html, fallback: fallback)
 
     return CachedArticle(
       id: fallback.id,
       categoryID: fallback.categoryID,
       categoryTitle: fallback.categoryTitle,
       kind: fallback.kind,
-      title: title,
-      summary: String(body.prefix(160)),
-      body: body,
-      source: source ?? fallback.source,
-      publishedAt: published,
+      title: parsed.title,
+      summary: String(parsed.body.prefix(160)),
+      body: parsed.body,
+      source: parsed.source ?? fallback.source,
+      publishedAt: parsed.publishedAt,
       originalURL: fallback.originalURL,
-      attachments: attachments,
+      attachments: parsed.attachments,
       isFavorite: fallback.isFavorite
     )
-  }
-
-  private func parseAttachments(html: String, baseURL: URL) -> [ArticleAttachment] {
-    html.matches(of: #"<a[^>]+href=["']([^"']+\.(?:pdf|doc|docx|xls|xlsx))["'][^>]*>(.*?)</a>"#)
-      .compactMap { match in
-        guard let href = match[safe: 1],
-              let url = URL(string: href, relativeTo: baseURL)?.absoluteURL
-        else { return nil }
-        let title = (match[safe: 2] ?? url.lastPathComponent).strippingHTML.normalizedWhitespace
-        return ArticleAttachment(title: title, url: url, fileType: url.pathExtension.lowercased())
-      }
   }
 
   private func nearbyDate(for match: String, in html: String) -> Date? {
@@ -205,27 +230,10 @@ struct OfficialContentClient {
     return nil
   }
 
-  private func shouldKeepListLink(title: String, url: URL) -> Bool {
-    guard !title.isEmpty else { return false }
-    let ignored = ["首页", "上一页", "下一页", "尾页", "更多>>", "政务服务", "网站地图"]
-    if ignored.contains(title) { return false }
-    if url.absoluteString.contains("javascript:") { return false }
-    return url.host?.contains("nm.zsks.cn") == true
-  }
-
   private func stableID(_ text: String) -> String {
     SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
   }
 
-  private func trimChrome(from text: String, title: String) -> String {
-    let normalized = text.normalizedWhitespace
-    guard let titleRange = normalized.range(of: title) else { return normalized }
-    let afterTitle = normalized[titleRange.upperBound...]
-    if let footer = afterTitle.range(of: "政务服务 | 网站地图") {
-      return String(afterTitle[..<footer.lowerBound]).normalizedWhitespace
-    }
-    return String(afterTitle).normalizedWhitespace
-  }
 }
 
 enum DateFormatters {
@@ -267,64 +275,8 @@ enum DateFormatters {
 }
 
 private extension String {
-  var htmlToPlainText: String {
-    replacingOccurrences(of: "<br\\s*/?>", with: "\n", options: .regularExpression)
-      .replacingOccurrences(of: "</p>", with: "\n", options: .caseInsensitive)
-      .replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
-      .strippingHTML
-  }
-
-  var strippingHTML: String {
-    replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-      .replacingOccurrences(of: "&nbsp;", with: " ")
-      .replacingOccurrences(of: "&amp;", with: "&")
-      .replacingOccurrences(of: "&lt;", with: "<")
-      .replacingOccurrences(of: "&gt;", with: ">")
-      .replacingOccurrences(of: "&#13;", with: "\n")
-  }
-
-  var normalizedWhitespace: String {
-    replacingOccurrences(of: "[ \\t\\r\\f]+", with: " ", options: .regularExpression)
-      .replacingOccurrences(of: "\\n\\s*\\n+", with: "\n\n", options: .regularExpression)
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
   var nilIfBlank: String? {
     normalizedWhitespace.isEmpty ? nil : self
-  }
-
-  func matches(of pattern: String) -> [RegexMatch] {
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
-      return []
-    }
-    let range = NSRange(startIndex..<endIndex, in: self)
-    return regex.matches(in: self, range: range).map { result in
-      var groups: [String?] = []
-      for index in 0..<result.numberOfRanges {
-        let nsRange = result.range(at: index)
-        guard let range = Range(nsRange, in: self) else {
-          groups.append(nil)
-          continue
-        }
-        groups.append(String(self[range]))
-      }
-      return RegexMatch(groups: groups)
-    }
-  }
-
-  func firstMatch(of pattern: String) -> RegexMatch? {
-    matches(of: pattern).first
-  }
-}
-
-private struct RegexMatch {
-  let groups: [String?]
-
-  var fullMatch: String { groups.first.flatMap { $0 } ?? "" }
-
-  subscript(safe index: Int) -> String? {
-    guard groups.indices.contains(index) else { return nil }
-    return groups[index]
   }
 }
 

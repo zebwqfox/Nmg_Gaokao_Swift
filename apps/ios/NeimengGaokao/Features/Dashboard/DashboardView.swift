@@ -186,7 +186,7 @@ struct DashboardView: View {
     isRefreshing = true
     defer { isRefreshing = false }
 
-    let categories = contentClient.categories.filter { ["gaokao-policy", "gaokao-notice", "policies"].contains($0.id) }
+    let categories = contentClient.categories
     for category in categories {
       guard let fetched = try? await contentClient.fetchFeed(category: category, limit: 10) else { continue }
       for article in fetched {

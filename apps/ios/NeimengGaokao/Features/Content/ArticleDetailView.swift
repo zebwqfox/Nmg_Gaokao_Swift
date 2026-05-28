@@ -17,27 +17,28 @@ struct ArticleDetailView: View {
     fetchedDetail ?? articles.first(where: { $0.id == articleID })
   }
 
+  private var imageAttachments: [ArticleAttachment] {
+    article?.attachments.filter { $0.fileType == "image" } ?? []
+  }
+
+  private var documentAttachments: [ArticleAttachment] {
+    article?.attachments.filter { $0.fileType != "image" } ?? []
+  }
+
+  private var bodyParagraphs: [String] {
+    guard let body = article?.body else { return [] }
+    return body
+      .components(separatedBy: "\n\n")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+  }
+
   var body: some View {
     Group {
       if let article {
         ScrollView {
-          VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 10) {
-              Text(article.title)
-                .font(.title2.weight(.bold))
-                .fixedSize(horizontal: false, vertical: true)
-              HStack(spacing: 8) {
-                Text(article.categoryTitle)
-                if let source = article.source, !source.isEmpty {
-                  Text(source)
-                }
-                if let publishedAt = article.publishedAt {
-                  Text(DateFormatters.displayDate.string(from: publishedAt))
-                }
-              }
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            }
+          VStack(alignment: .leading, spacing: 20) {
+            header(for: article)
 
             if isLoading {
               ProgressView("正在读取正文")
@@ -50,22 +51,38 @@ struct ArticleDetailView: View {
                 .foregroundStyle(.red)
             }
 
-            if article.body.isEmpty {
+            if !imageAttachments.isEmpty {
+              VStack(alignment: .leading, spacing: 12) {
+                Text("正文图片")
+                  .font(.headline)
+                ForEach(imageAttachments) { image in
+                  ArticleRemoteImage(url: image.url, caption: image.title)
+                }
+              }
+            }
+
+            if bodyParagraphs.isEmpty {
               Text(article.summary.isEmpty ? "这条内容可能是附件或外链，请打开原文查看。" : article.summary)
                 .font(.body)
                 .foregroundStyle(.secondary)
-            } else {
-              Text(article.body)
-                .font(.body)
                 .lineSpacing(6)
-                .textSelection(.enabled)
+            } else {
+              VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(bodyParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                  Text(paragraph)
+                    .font(.body)
+                    .lineSpacing(7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                }
+              }
             }
 
-            if !article.attachments.isEmpty {
+            if !documentAttachments.isEmpty {
               VStack(alignment: .leading, spacing: 10) {
                 Text("附件")
                   .font(.headline)
-                ForEach(article.attachments) { attachment in
+                ForEach(documentAttachments) { attachment in
                   Button {
                     router.navigate(to: .web(title: attachment.title, url: attachment.url))
                   } label: {
@@ -111,6 +128,9 @@ struct ArticleDetailView: View {
             }
           }
         }
+        .refreshable {
+          await loadDetailIfNeeded(article)
+        }
         .task(id: article.id) {
           await loadDetailIfNeeded(article)
         }
@@ -120,8 +140,32 @@ struct ArticleDetailView: View {
     }
   }
 
+  @ViewBuilder
+  private func header(for article: CachedArticle) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(article.title)
+        .font(.title2.weight(.bold))
+        .fixedSize(horizontal: false, vertical: true)
+
+      VStack(alignment: .leading, spacing: 4) {
+        if let publishedAt = article.publishedAt {
+          Label(DateFormatters.displayDate.string(from: publishedAt), systemImage: "calendar")
+        }
+        if let source = article.source, !source.isEmpty {
+          Label(source, systemImage: "building.2")
+        }
+        Label(article.categoryTitle, systemImage: "tag")
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+    }
+    .padding()
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .nativeGlassPanel(cornerRadius: 16, tint: .blue.opacity(0.05))
+  }
+
   private func loadDetailIfNeeded(_ article: CachedArticle) async {
-    guard article.body.isEmpty, !isLoading else { return }
+    guard !isLoading else { return }
     isLoading = true
     errorMessage = nil
     defer { isLoading = false }
