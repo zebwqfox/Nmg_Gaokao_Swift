@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - master
       - main
     paths:
       - "apps/ios/**"
@@ -15,6 +16,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ios26ui-unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   PROJECT_DIR: apps/ios
@@ -79,6 +84,7 @@ jobs:
           xcodebuild -list -project "$PROJECT_PATH"
 
       - name: Build unit tests
+        if: github.event_name == 'pull_request'
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -euo pipefail
@@ -105,7 +111,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            clean build
+            -parallelizeTargets \
+            build
 
       - name: Verify app bundle
         working-directory: ${{ env.PROJECT_DIR }}
