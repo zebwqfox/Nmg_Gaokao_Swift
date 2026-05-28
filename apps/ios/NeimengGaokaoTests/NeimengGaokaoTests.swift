@@ -28,6 +28,10 @@ final class NeimengGaokaoTests: XCTestCase {
     )
     XCTAssertEqual(
       OfficialFeedPagination.pageURL(for: category, page: 2).absoluteString,
+      "https://www.nm.zsks.cn/tzgg/index_1.html"
+    )
+    XCTAssertEqual(
+      OfficialFeedPagination.pageURL(for: category, page: 3).absoluteString,
       "https://www.nm.zsks.cn/tzgg/index_2.html"
     )
   }
@@ -54,12 +58,19 @@ final class NeimengGaokaoTests: XCTestCase {
   }
 
   func testOfficialFeedPaginationReadsTotalPages() {
-    let html = """
-    <a href="index_2.html">2</a>
-    <a href="index_3.html">3</a>
-    <a href="index_12.html">尾页</a>
+    let jsHTML = """
+    var currentPage = 0;
+    var countPage = 34;
+    document.write("共"+"34"+"页");
     """
-    XCTAssertEqual(OfficialFeedPagination.totalPages(in: html), 12)
+    XCTAssertEqual(OfficialFeedPagination.totalPages(in: jsHTML), 34)
+
+    let linkHTML = """
+    <a href="index_1.html">2</a>
+    <a href="index_2.html">3</a>
+    <a href="index_33.html">尾页</a>
+    """
+    XCTAssertEqual(OfficialFeedPagination.totalPages(in: linkHTML), 34)
   }
 
   func testImportantNewsRankerPinsGaokaoNotice() {
@@ -137,6 +148,44 @@ final class NeimengGaokaoTests: XCTestCase {
       return false
     })
     XCTAssertFalse(parsed.attachments.contains { $0.fileType == "image" })
+  }
+
+  func testOfficialArticleParserReadsTableAndScriptAttachments() {
+    let tableHTML = """
+    <div class="TRS_Editor">
+      <table border="1">
+        <tr><td><b>盟市名称</b></td><td><b>岗位名称</b></td><td><b>报名人数</b></td></tr>
+        <tr><td>阿拉善盟</td><td>阿拉善左旗/化学/初中</td><td>62</td></tr>
+        <tr><td>呼伦贝尔市</td><td>鄂温克旗/地理/初中</td><td>44</td></tr>
+      </table>
+    </div>
+    """
+    let fallback = CachedArticle(
+      id: "table-test",
+      categoryID: "notice",
+      categoryTitle: "通知公告",
+      kind: .notice,
+      title: "fallback",
+      originalURL: URL(string: "https://www.nm.zsks.cn/tzgg/202605/t20260527_46396.html")!
+    )
+    let parsed = OfficialArticleParser.parse(html: tableHTML, fallback: fallback)
+    XCTAssertTrue(parsed.contentBlocks.contains {
+      if case .table(let rows) = $0 {
+        return rows.first?.contains("盟市名称") == true && rows.count == 3
+      }
+      return false
+    })
+
+    let attachmentHTML = """
+    <script>
+    var xgwd = '<a href="/upload/2026/guide.pdf">报考指南</a>,';
+    var str = '<a href="/upload/2026/list.xlsx">岗位表</a>|';
+    </script>
+    """
+    let attachmentParsed = OfficialArticleParser.parse(html: attachmentHTML, fallback: fallback)
+    XCTAssertEqual(attachmentParsed.attachments.count, 2)
+    XCTAssertTrue(attachmentParsed.attachments.contains { $0.title.contains("报考指南") })
+    XCTAssertTrue(attachmentParsed.attachments.contains { $0.fileType == "xlsx" })
   }
 
   func testOfficialServiceResolverMatchesByKeyword() {

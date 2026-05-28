@@ -124,6 +124,8 @@ struct ArticleDetailView: View {
             ArticleRemoteImage(url: url, caption: caption, referer: article.originalURL)
           case .inlineImage(let data, let caption):
             ArticleRemoteImage(inlineData: data, caption: caption)
+          case .table(let rows):
+            ArticleTableView(rows: rows)
           }
         }
       }

@@ -49,6 +49,7 @@ enum ArticleContentBlock: Codable, Hashable {
   case text(String)
   case remoteImage(url: URL, caption: String)
   case inlineImage(data: Data, caption: String)
+  case table(rows: [[String]])
 }
 
 @Model

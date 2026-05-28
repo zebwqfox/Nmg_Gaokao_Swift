@@ -19,24 +19,22 @@ struct ContentFeedView: View {
   @State private var isSearchMode = false
   @State private var activeSearchTerm: String?
   @State private var feedLoadGeneration = 0
+  @State private var searchTask: Task<Void, Never>?
+
+  private var trimmedQuery: String {
+    query.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var awaitingOfficialSearch: Bool {
+    !trimmedQuery.isEmpty && activeSearchTerm != trimmedQuery
+  }
 
   private var selectedCategory: OfficialCategory {
     contentClient.categories.first(where: { $0.id == selectedCategoryID }) ?? contentClient.categories[0]
   }
 
   private var displayedArticles: [CachedArticle] {
-    if isSearchMode {
-      return ImportantNewsRanker.ranked(feedItems)
-    }
-    if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      return ImportantNewsRanker.ranked(feedItems)
-    }
-    return ImportantNewsRanker.ranked(
-      feedItems.filter { article in
-        article.title.localizedCaseInsensitiveContains(query)
-          || article.summary.localizedCaseInsensitiveContains(query)
-      }
-    )
+    ImportantNewsRanker.ranked(feedItems)
   }
 
   private var pinnedArticles: [CachedArticle] {
@@ -68,7 +66,12 @@ struct ContentFeedView: View {
         }
       }
 
-      if isRefreshing, feedItems.isEmpty {
+      if awaitingOfficialSearch || (isRefreshing && isSearchMode) {
+        Section {
+          ProgressView(awaitingOfficialSearch && !isRefreshing ? "准备搜索官网" : "正在搜索官网")
+            .frame(maxWidth: .infinity, minHeight: 120)
+        }
+      } else if isRefreshing, feedItems.isEmpty {
         Section {
           ProgressView("正在从官网获取资讯")
             .frame(maxWidth: .infinity, minHeight: 120)
@@ -79,7 +82,11 @@ struct ContentFeedView: View {
         }
       } else if displayedArticles.isEmpty {
         Section {
-          ContentUnavailableView("暂无内容", systemImage: "doc.text.magnifyingglass", description: Text("换个栏目或搜索关键词试试。"))
+          ContentUnavailableView(
+            isSearchMode ? "未找到相关内容" : "暂无内容",
+            systemImage: "doc.text.magnifyingglass",
+            description: Text(isSearchMode ? "换个关键词试试。" : "换个栏目或搜索关键词试试。")
+          )
         }
       } else {
         if !pinnedArticles.isEmpty {
@@ -127,7 +134,11 @@ struct ContentFeedView: View {
     .navigationTitle("资讯")
     .searchable(text: $query, prompt: "搜索高考、政策、报名")
     .onSubmit(of: .search) {
+      searchTask?.cancel()
       Task { await searchOrFilter() }
+    }
+    .onChange(of: query) { _, _ in
+      scheduleOfficialSearch()
     }
     .refreshable {
       await refreshCurrentFeed()
@@ -171,6 +182,24 @@ struct ContentFeedView: View {
       } else {
         await loadNextPage()
       }
+    }
+  }
+
+  private func scheduleOfficialSearch() {
+    searchTask?.cancel()
+
+    let term = trimmedQuery
+    if term.isEmpty {
+      if isSearchMode || activeSearchTerm != nil {
+        Task { await reloadFeed() }
+      }
+      return
+    }
+
+    searchTask = Task {
+      try? await Task.sleep(nanoseconds: 450_000_000)
+      guard !Task.isCancelled else { return }
+      await searchOrFilter()
     }
   }
 
@@ -233,9 +262,13 @@ struct ContentFeedView: View {
   }
 
   private func searchOrFilter() async {
-    let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    let term = trimmedQuery
     guard !term.isEmpty else {
       await reloadFeed()
+      return
+    }
+
+    if activeSearchTerm == term, !feedItems.isEmpty, !isRefreshing {
       return
     }
 
