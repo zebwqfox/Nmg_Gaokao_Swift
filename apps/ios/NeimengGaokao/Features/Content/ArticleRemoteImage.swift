@@ -4,6 +4,7 @@ import UIKit
 struct ArticleRemoteImage: View {
   let url: URL
   let caption: String
+  var referer: URL?
 
   @State private var image: UIImage?
   @State private var failed = false
@@ -39,16 +40,9 @@ struct ArticleRemoteImage: View {
   private func load() async {
     image = nil
     failed = false
-    do {
-      let (data, response) = try await OfficialSiteTrust.makeSession().data(from: url)
-      guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode,
-            let loaded = UIImage(data: data)
-      else {
-        failed = true
-        return
-      }
+    if let loaded = await OfficialImageLoader.load(from: url, referer: referer) {
       image = loaded
-    } catch {
+    } else {
       failed = true
     }
   }

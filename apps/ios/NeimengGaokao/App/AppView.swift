@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AppView: View {
-  @State private var selectedTab: AppTab = .dashboard
+  @State private var selectedTab: AppTab = .content
   @State private var router = TabRouter()
 
   var body: some View {

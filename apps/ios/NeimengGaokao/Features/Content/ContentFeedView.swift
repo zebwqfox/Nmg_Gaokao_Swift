@@ -307,7 +307,7 @@ private struct ArticleListRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(.orange.gradient, in: Capsule())
-        } else if !article.attachments.isEmpty {
+        } else if !article.documentAttachments.isEmpty {
           Image(systemName: "paperclip")
             .foregroundStyle(.secondary)
         }

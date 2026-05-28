@@ -17,24 +17,13 @@ struct ArticleDetailView: View {
     fetchedDetail ?? articles.first(where: { $0.id == articleID })
   }
 
-  private var imageAttachments: [ArticleAttachment] {
-    article?.attachments.filter { $0.fileType == "image" } ?? []
-  }
-
   private var documentAttachments: [ArticleAttachment] {
-    article?.attachments.filter { $0.fileType != "image" } ?? []
-  }
-
-  private var bodyParagraphs: [String] {
-    guard let body = article?.body else { return [] }
-    return body
-      .components(separatedBy: "\n\n")
-      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty }
+    article?.documentAttachments ?? []
   }
 
   private var showsBodyLoading: Bool {
     isLoading && (article?.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+      && (article?.contentBlocks.isEmpty ?? true)
   }
 
   var body: some View {
@@ -55,32 +44,7 @@ struct ArticleDetailView: View {
                 .foregroundStyle(.red)
             }
 
-            if !imageAttachments.isEmpty {
-              VStack(alignment: .leading, spacing: 12) {
-                Text("正文图片")
-                  .font(.headline)
-                ForEach(imageAttachments) { image in
-                  ArticleRemoteImage(url: image.url, caption: image.title)
-                }
-              }
-            }
-
-            if bodyParagraphs.isEmpty {
-              Text(article.summary.isEmpty ? "这条内容可能是附件或外链，请打开原文查看。" : article.summary)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineSpacing(6)
-            } else {
-              VStack(alignment: .leading, spacing: 14) {
-                ForEach(Array(bodyParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                  Text(paragraph)
-                    .font(.body)
-                    .lineSpacing(7)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                }
-              }
-            }
+            articleBody(for: article)
 
             if !documentAttachments.isEmpty {
               VStack(alignment: .leading, spacing: 10) {
@@ -145,6 +109,48 @@ struct ArticleDetailView: View {
   }
 
   @ViewBuilder
+  private func articleBody(for article: CachedArticle) -> some View {
+    if !article.contentBlocks.isEmpty {
+      VStack(alignment: .leading, spacing: 14) {
+        ForEach(Array(article.contentBlocks.enumerated()), id: \.offset) { _, block in
+          switch block {
+          case .text(let paragraph):
+            Text(paragraph)
+              .font(.body)
+              .lineSpacing(7)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .textSelection(.enabled)
+          case .image(let url, let caption):
+            ArticleRemoteImage(url: url, caption: caption, referer: article.originalURL)
+          }
+        }
+      }
+    } else if bodyParagraphs(for: article).isEmpty {
+      Text(article.summary.isEmpty ? "这条内容可能是附件或外链，请打开原文查看。" : article.summary)
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .lineSpacing(6)
+    } else {
+      VStack(alignment: .leading, spacing: 14) {
+        ForEach(Array(bodyParagraphs(for: article).enumerated()), id: \.offset) { _, paragraph in
+          Text(paragraph)
+            .font(.body)
+            .lineSpacing(7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+      }
+    }
+  }
+
+  private func bodyParagraphs(for article: CachedArticle) -> [String] {
+    article.body
+      .components(separatedBy: "\n\n")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+  }
+
+  @ViewBuilder
   private func header(for article: CachedArticle) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       Text(article.title)
@@ -170,6 +176,7 @@ struct ArticleDetailView: View {
 
   private func loadDetailIfNeeded(_ article: CachedArticle, force: Bool) async {
     let hasBody = !article.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || !article.contentBlocks.isEmpty
     guard force || !hasBody else { return }
 
     let showSpinner = !hasBody

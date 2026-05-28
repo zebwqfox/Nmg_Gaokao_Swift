@@ -218,6 +218,7 @@ struct OfficialContentClient {
       publishedAt: parsed.publishedAt,
       originalURL: fallback.originalURL,
       attachments: parsed.attachments,
+      contentBlocks: parsed.contentBlocks,
       isFavorite: fallback.isFavorite
     )
   }

@@ -5,6 +5,7 @@ struct ParsedOfficialArticle {
   let source: String?
   let publishedAt: Date?
   let body: String
+  let contentBlocks: [ArticleContentBlock]
   let attachments: [ArticleAttachment]
 }
 
@@ -17,16 +18,18 @@ enum OfficialArticleParser {
     let published = extractPublishedAt(from: sanitized) ?? fallback.publishedAt
     let source = extractSource(from: sanitized) ?? fallback.source
     let contentHTML = extractContentHTML(from: sanitized) ?? ""
-    let images = parseImages(html: contentHTML.isEmpty ? sanitized : contentHTML, baseURL: fallback.originalURL)
+    let sourceHTML = contentHTML.isEmpty ? sanitized : contentHTML
+    let contentBlocks = parseContentBlocks(html: sourceHTML, baseURL: fallback.originalURL)
     let documents = parseDocuments(html: sanitized, baseURL: fallback.originalURL)
-    let body = plainText(from: contentHTML.isEmpty ? sanitized : contentHTML, title: title)
+    let body = plainText(from: sourceHTML, title: title)
 
     return ParsedOfficialArticle(
       title: title,
       source: source,
       publishedAt: published,
       body: body,
-      attachments: mergeAttachments(images: images, documents: documents)
+      contentBlocks: contentBlocks,
+      attachments: documents
     )
   }
 
@@ -125,17 +128,71 @@ enum OfficialArticleParser {
     return String(tail[..<end])
   }
 
-  private static func parseImages(html: String, baseURL: URL) -> [ArticleAttachment] {
-    html.matches(of: #"<img[^>]+src=["']([^"']+)["'][^>]*>"#)
-      .compactMap { match -> ArticleAttachment? in
-        guard let src = match[safe: 1],
-              let url = URL(string: src, relativeTo: baseURL)?.absoluteURL
-        else { return nil }
-        let alt = match.fullMatch.firstMatch(of: #"alt=["']([^"']*)["']"#)?[safe: 1]?
+  private static func parseContentBlocks(html: String, baseURL: URL) -> [ArticleContentBlock] {
+    guard let regex = try? NSRegularExpression(
+      pattern: #"<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>"#,
+      options: [.caseInsensitive, .dotMatchesLineSeparators]
+    ) else {
+      return fallbackTextBlocks(from: html, title: "", baseURL: baseURL)
+    }
+
+    var blocks: [ArticleContentBlock] = []
+    var cursor = html.startIndex
+    let fullRange = NSRange(html.startIndex..<html.endIndex, in: html)
+
+    for result in regex.matches(in: html, range: fullRange) {
+      guard let tagRange = Range(result.range, in: html),
+            let srcRange = Range(result.range(at: 1), in: html)
+      else { continue }
+
+      appendTextBlock(from: html[cursor..<tagRange.lowerBound], to: &blocks)
+      let tagHTML = String(html[tagRange])
+      let src = String(html[srcRange])
+      if let url = resolveImageURL(src, baseURL: baseURL) {
+        let alt = tagHTML.firstMatch(of: #"alt=["']([^"']*)["']"#)?[safe: 1]?
           .strippingHTML.normalizedWhitespace
-        let title = alt?.nilIfBlank ?? url.lastPathComponent
-        return ArticleAttachment(title: title, url: url, fileType: "image")
+        let caption = alt?.nilIfBlank ?? url.lastPathComponent
+        blocks.append(.image(url: url, caption: caption))
       }
+      cursor = tagRange.upperBound
+    }
+
+    appendTextBlock(from: html[cursor...], to: &blocks)
+    return blocks
+  }
+
+  private static func appendTextBlock(from html: Substring, to blocks: inout [ArticleContentBlock]) {
+    let text = plainTextFragment(from: String(html))
+    guard !text.isEmpty else { return }
+    if case .text(let existing)? = blocks.last {
+      blocks[blocks.count - 1] = .text(existing + "\n\n" + text)
+    } else {
+      blocks.append(.text(text))
+    }
+  }
+
+  private static func plainTextFragment(from html: String) -> String {
+    html
+      .replacingOccurrences(of: "<br\\s*/?>", with: "\n", options: [.regularExpression, .caseInsensitive])
+      .replacingOccurrences(of: "</p>", with: "\n\n", options: .caseInsensitive)
+      .replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
+      .replacingOccurrences(of: "</li>", with: "\n", options: .caseInsensitive)
+      .strippingHTML
+      .normalizedWhitespace
+  }
+
+  private static func fallbackTextBlocks(from html: String, title: String, baseURL: URL) -> [ArticleContentBlock] {
+    let text = plainText(from: html, title: title)
+    return text.isEmpty ? [] : [.text(text)]
+  }
+
+  private static func resolveImageURL(_ src: String, baseURL: URL) -> URL? {
+    let trimmed = src.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    if trimmed.hasPrefix("//") {
+      return URL(string: "https:\(trimmed)")
+    }
+    return URL(string: trimmed, relativeTo: baseURL)?.absoluteURL
   }
 
   private static func parseDocuments(html: String, baseURL: URL) -> [ArticleAttachment] {
@@ -147,11 +204,6 @@ enum OfficialArticleParser {
         let title = (match[safe: 2] ?? url.lastPathComponent).strippingHTML.normalizedWhitespace
         return ArticleAttachment(title: title, url: url, fileType: url.pathExtension.lowercased())
       }
-  }
-
-  private static func mergeAttachments(images: [ArticleAttachment], documents: [ArticleAttachment]) -> [ArticleAttachment] {
-    var seen = Set<String>()
-    return (images + documents).filter { seen.insert($0.url.absoluteString).inserted }
   }
 
   private static func plainText(from html: String, title: String) -> String {

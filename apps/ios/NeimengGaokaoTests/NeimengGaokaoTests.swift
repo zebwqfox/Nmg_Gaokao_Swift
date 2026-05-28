@@ -121,7 +121,11 @@ final class NeimengGaokaoTests: XCTestCase {
     XCTAssertFalse(parsed.body.contains("document.write"))
     XCTAssertFalse(parsed.body.contains("function goPAGE"))
     XCTAssertTrue(parsed.body.contains("体育统考成绩"))
-    XCTAssertTrue(parsed.attachments.contains { $0.fileType == "image" })
+    XCTAssertTrue(parsed.contentBlocks.contains {
+      if case .image = $0 { return true }
+      return false
+    })
+    XCTAssertFalse(parsed.attachments.contains { $0.fileType == "image" })
   }
 
   func testOfficialServiceResolverMatchesByKeyword() {

@@ -45,6 +45,11 @@ struct ArticleAttachment: Identifiable, Hashable, Codable {
   }
 }
 
+enum ArticleContentBlock: Codable, Hashable {
+  case text(String)
+  case image(url: URL, caption: String)
+}
+
 @Model
 final class CachedCategory {
   @Attribute(.unique) var id: String
@@ -78,6 +83,7 @@ final class CachedArticle {
   var publishedAt: Date?
   var originalURLString: String
   var attachmentData: Data
+  var contentBlocksData: Data
   var isFavorite: Bool
   var cachedAt: Date
 
@@ -93,6 +99,7 @@ final class CachedArticle {
     publishedAt: Date? = nil,
     originalURL: URL,
     attachments: [ArticleAttachment] = [],
+    contentBlocks: [ArticleContentBlock] = [],
     isFavorite: Bool = false,
     cachedAt: Date = .now
   ) {
@@ -107,6 +114,7 @@ final class CachedArticle {
     self.publishedAt = publishedAt
     self.originalURLString = originalURL.absoluteString
     self.attachmentData = (try? JSONEncoder().encode(attachments)) ?? Data()
+    self.contentBlocksData = (try? JSONEncoder().encode(contentBlocks)) ?? Data()
     self.isFavorite = isFavorite
     self.cachedAt = cachedAt
   }
@@ -116,19 +124,37 @@ final class CachedArticle {
   var attachments: [ArticleAttachment] {
     (try? JSONDecoder().decode([ArticleAttachment].self, from: attachmentData)) ?? []
   }
+  var contentBlocks: [ArticleContentBlock] {
+    (try? JSONDecoder().decode([ArticleContentBlock].self, from: contentBlocksData)) ?? []
+  }
 
   func update(from article: CachedArticle) {
     categoryID = article.categoryID
     categoryTitle = article.categoryTitle
     kindRawValue = article.kindRawValue
     title = article.title
-    summary = article.summary
-    body = article.body
-    source = article.source
-    publishedAt = article.publishedAt
+    if !article.summary.isEmpty {
+      summary = article.summary
+    }
+    if !article.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      body = article.body
+    }
+    source = article.source ?? source
+    publishedAt = article.publishedAt ?? publishedAt
     originalURLString = article.originalURLString
-    attachmentData = article.attachmentData
+    if !article.contentBlocksData.isEmpty {
+      contentBlocksData = article.contentBlocksData
+    }
+    if !article.attachmentData.isEmpty {
+      attachmentData = article.attachmentData
+    }
     cachedAt = .now
+  }
+}
+
+extension CachedArticle {
+  var documentAttachments: [ArticleAttachment] {
+    attachments.filter { $0.fileType.lowercased() != "image" }
   }
 }
 
