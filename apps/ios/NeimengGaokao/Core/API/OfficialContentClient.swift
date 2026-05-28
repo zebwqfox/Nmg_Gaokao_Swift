@@ -43,7 +43,7 @@ struct OfficialContentClient {
   }
 
   func fetchArticle(from listItem: CachedArticle) async throws -> CachedArticle {
-    if listItem.originalURL.pathExtension.lowercased().isDocumentExtension {
+    if DocumentAttachmentExtensions.isDocument(url: listItem.originalURL) {
       return listItem
     }
     let (html, _) = try await fetchTextWithFallback(listItem.originalURL)
@@ -193,8 +193,12 @@ struct OfficialContentClient {
         source: nil,
         publishedAt: date,
         originalURL: url,
-        attachments: url.pathExtension.lowercased().isDocumentExtension
-          ? [ArticleAttachment(title: title, url: url, fileType: url.pathExtension.lowercased())]
+        attachments: DocumentAttachmentExtensions.isDocument(url: url)
+          ? [ArticleAttachment(
+            title: title,
+            url: url,
+            fileType: DocumentAttachmentExtensions.fileExtension(from: url) ?? url.pathExtension.lowercased()
+          )]
           : []
       ))
       if items.count >= limit {
@@ -283,12 +287,6 @@ enum DateFormatters {
 private extension String {
   var nilIfBlank: String? {
     normalizedWhitespace.isEmpty ? nil : self
-  }
-}
-
-private extension String {
-  var isDocumentExtension: Bool {
-    ["pdf", "doc", "docx", "xls", "xlsx"].contains(lowercased())
   }
 }
 

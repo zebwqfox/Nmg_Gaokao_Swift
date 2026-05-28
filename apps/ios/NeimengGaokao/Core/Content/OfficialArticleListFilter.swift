@@ -69,7 +69,7 @@ enum OfficialArticleListFilter {
     if path.range(of: #"/20\d{4}/t\d"#, options: .regularExpression) != nil { return true }
     if path.range(of: #"/t20\d{6}_\d+\.html"#, options: .regularExpression) != nil { return true }
     if path.hasSuffix(".html"), path.split(separator: "/").count >= 4 { return true }
-    if path.hasSuffix(".pdf") || path.hasSuffix(".doc") || path.hasSuffix(".docx") { return true }
+    if DocumentAttachmentExtensions.isDocument(url: url) { return true }
     return false
   }
 

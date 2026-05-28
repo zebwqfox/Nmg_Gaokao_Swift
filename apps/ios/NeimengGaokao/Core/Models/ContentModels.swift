@@ -43,11 +43,59 @@ struct ArticleAttachment: Identifiable, Hashable, Codable {
     self.url = url
     self.fileType = fileType
   }
+
+  var systemImageName: String {
+    switch fileType.lowercased() {
+    case "zip", "rar", "7z", "tar", "gz":
+      "doc.zipper"
+    case "ppt", "pptx":
+      "doc.richtext"
+    case "xls", "xlsx", "csv", "et":
+      "tablecells"
+    default:
+      "doc"
+    }
+  }
+}
+
+enum DocumentAttachmentExtensions {
+  static let known: Set<String> = [
+    "pdf",
+    "doc", "docx", "wps",
+    "xls", "xlsx", "csv", "et",
+    "ppt", "pptx", "dps",
+    "zip", "rar", "7z", "tar", "gz",
+    "txt"
+  ]
+
+  static func isDocument(pathExtension: String) -> Bool {
+    known.contains(pathExtension.lowercased())
+  }
+
+  static func isDocument(url: URL) -> Bool {
+    guard let ext = fileExtension(from: url) else { return false }
+    return isDocument(pathExtension: ext)
+  }
+
+  static func fileExtension(from url: URL) -> String? {
+    let ext = url.pathExtension.lowercased()
+    if !ext.isEmpty {
+      return ext
+    }
+
+    let name = url.lastPathComponent
+    guard let dot = name.lastIndex(of: "."), dot < name.index(before: name.endIndex) else {
+      return nil
+    }
+    let candidate = String(name[name.index(after: dot)...]).lowercased()
+    return known.contains(candidate) ? candidate : nil
+  }
 }
 
 enum ArticleContentBlock: Codable, Hashable {
   case text(String)
   case remoteImage(url: URL, caption: String)
+  case inlineImagePayload(String, caption: String)
   case inlineImage(data: Data, caption: String)
   case table(rows: [[String]])
 }

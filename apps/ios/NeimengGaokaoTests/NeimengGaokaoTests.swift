@@ -144,10 +144,23 @@ final class NeimengGaokaoTests: XCTestCase {
     """
     let dataParsed = OfficialArticleParser.parse(html: dataHTML, fallback: fallback)
     XCTAssertTrue(dataParsed.contentBlocks.contains {
-      if case .inlineImage = $0 { return true }
+      if case .inlineImagePayload = $0 { return true }
       return false
     })
     XCTAssertFalse(parsed.attachments.contains { $0.fileType == "image" })
+
+    let lazyHTML = """
+    <div class="TRS_Editor">
+      <p><img data-src="/images/sample.jpg" alt="懒加载图" /></p>
+    </div>
+    """
+    let lazyParsed = OfficialArticleParser.parse(html: lazyHTML, fallback: fallback)
+    XCTAssertTrue(lazyParsed.contentBlocks.contains {
+      if case .remoteImage(let url, let caption) = $0 {
+        return url.path.hasSuffix("sample.jpg") && caption == "懒加载图"
+      }
+      return false
+    })
   }
 
   func testOfficialArticleParserReadsTableAndScriptAttachments() {
@@ -176,16 +189,48 @@ final class NeimengGaokaoTests: XCTestCase {
       return false
     })
 
+    let mergedHTML = """
+    <table border="1">
+      <tr><td>招考大类</td><td>普通计划</td><td>专项计划</td></tr>
+      <tr><td rowspan="2">医学类</td><td>护理学</td><td>174</td><td>140.5</td></tr>
+      <tr><td>口腔医学</td><td>-</td><td>138</td></tr>
+      <tr><td>理工类1</td><td>144</td><td>142</td></tr>
+    </table>
+    """
+    let mergedParsed = OfficialArticleParser.parse(html: mergedHTML, fallback: fallback)
+    guard case .table(let mergedRows)? = mergedParsed.contentBlocks.first else {
+      return XCTFail("Expected merged table block")
+    }
+    XCTAssertEqual(mergedRows.count, 4)
+    XCTAssertEqual(mergedRows[0], ["招考大类", "普通计划", "专项计划", ""])
+    XCTAssertEqual(mergedRows[1], ["医学类", "护理学", "174", "140.5"])
+    XCTAssertEqual(mergedRows[2], ["", "口腔医学", "-", "138"])
+    XCTAssertEqual(mergedRows[3], ["理工类1", "144", "142", ""])
+
+    let colspanHTML = """
+    <table border="1">
+      <tr><td>大类</td><td colspan="2">分数线</td></tr>
+      <tr><td>文史</td><td>182.5</td><td>178.5</td></tr>
+    </table>
+    """
+    let colspanParsed = OfficialArticleParser.parse(html: colspanHTML, fallback: fallback)
+    guard case .table(let colspanRows)? = colspanParsed.contentBlocks.first else {
+      return XCTFail("Expected colspan table block")
+    }
+    XCTAssertEqual(colspanRows[0], ["大类", "分数线", ""])
+    XCTAssertEqual(colspanRows[1], ["文史", "182.5", "178.5"])
+
     let attachmentHTML = """
     <script>
     var xgwd = '<a href="/upload/2026/guide.pdf">报考指南</a>,';
-    var str = '<a href="/upload/2026/list.xlsx">岗位表</a>|';
+    var str = '<a href="/upload/2026/list.xlsx">岗位表</a>|<a href="/upload/2026/data.rar">资料包</a>|';
     </script>
     """
     let attachmentParsed = OfficialArticleParser.parse(html: attachmentHTML, fallback: fallback)
-    XCTAssertEqual(attachmentParsed.attachments.count, 2)
+    XCTAssertEqual(attachmentParsed.attachments.count, 3)
     XCTAssertTrue(attachmentParsed.attachments.contains { $0.title.contains("报考指南") })
     XCTAssertTrue(attachmentParsed.attachments.contains { $0.fileType == "xlsx" })
+    XCTAssertTrue(attachmentParsed.attachments.contains { $0.fileType == "rar" })
   }
 
   func testOfficialServiceResolverMatchesByKeyword() {

@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 struct ParsedOfficialArticle {
   let title: String
@@ -175,13 +174,7 @@ enum OfficialArticleParser {
         if let src = extractImageSrc(from: tagHTML) {
           let alt = tagHTML.firstMatch(of: #"alt=["']([^"']*)["']"#)?[safe: 1]?
             .strippingHTML.normalizedWhitespace
-          if let data = decodeDataURLImage(src) {
-            let caption = alt?.nilIfBlank ?? "正文插图"
-            blocks.append(.inlineImage(data: data, caption: caption))
-          } else if let url = resolveImageURL(src, baseURL: baseURL) {
-            let caption = alt?.nilIfBlank ?? url.lastPathComponent
-            blocks.append(.remoteImage(url: url, caption: caption))
-          }
+          appendImageBlock(src: src, alt: alt, baseURL: baseURL, to: &blocks)
         }
         cursor = tagEnd
 
@@ -202,19 +195,97 @@ enum OfficialArticleParser {
   private static func parseTable(from html: String, startingAt start: String.Index) -> (rows: [[String]], endIndex: String.Index)? {
     guard let endIndex = extractBalancedTag("table", from: html, startingAt: start) else { return nil }
     let tableHTML = String(html[start..<endIndex])
-    let rows = tableHTML
-      .matches(of: #"<tr[^>]*>([\s\S]*?)</tr>"#)
-      .compactMap { match -> [String]? in
-        let rowHTML = match[safe: 1] ?? ""
-        let cells = rowHTML
-          .matches(of: #"<t[dh][^>]*>([\s\S]*?)</t[dh]>"#)
-          .map { plainTextFragment(from: $0[safe: 1] ?? "") }
-          .filter { !$0.isEmpty }
-        return cells.isEmpty ? nil : cells
-      }
-
+    let rows = buildTableGrid(from: tableHTML)
     guard !rows.isEmpty else { return nil }
     return (rows, endIndex)
+  }
+
+  private struct ParsedTableCell {
+    let text: String
+    let colspan: Int
+    let rowspan: Int
+  }
+
+  private static func buildTableGrid(from tableHTML: String) -> [[String]] {
+    var grid: [[String]] = []
+    var rowspanCarry: [Int: Int] = [:]
+
+    let rowHTMLs = tableHTML
+      .matches(of: #"<tr[^>]*>([\s\S]*?)</tr>"#)
+      .map { $0[safe: 1] ?? "" }
+
+    for rowHTML in rowHTMLs {
+      var row: [String] = []
+      var col = 0
+      let cells = parseTableCells(from: rowHTML)
+      var cellIndex = 0
+
+      while cellIndex < cells.count {
+        while let rowsLeft = rowspanCarry[col], rowsLeft > 0 {
+          row.append("")
+          if rowsLeft > 1 {
+            rowspanCarry[col] = rowsLeft - 1
+          } else {
+            rowspanCarry.removeValue(forKey: col)
+          }
+          col += 1
+        }
+
+        let cell = cells[cellIndex]
+        cellIndex += 1
+
+        for spanIndex in 0..<cell.colspan {
+          row.append(spanIndex == 0 ? cell.text : "")
+          if cell.rowspan > 1 {
+            rowspanCarry[col + spanIndex] = cell.rowspan - 1
+          }
+        }
+        col += cell.colspan
+      }
+
+      while let rowsLeft = rowspanCarry[col], rowsLeft > 0 {
+        row.append("")
+        if rowsLeft > 1 {
+          rowspanCarry[col] = rowsLeft - 1
+        } else {
+          rowspanCarry.removeValue(forKey: col)
+        }
+        col += 1
+      }
+
+      if !row.isEmpty {
+        grid.append(row)
+      }
+    }
+
+    let width = grid.map(\.count).max() ?? 0
+    return grid.map { row in
+      row + Array(repeating: "", count: max(0, width - row.count))
+    }
+  }
+
+  private static func parseTableCells(from rowHTML: String) -> [ParsedTableCell] {
+    rowHTML
+      .matches(of: #"<t([dh])([^>]*)>([\s\S]*?)</t\1>"#)
+      .map { match in
+        let attributes = match[safe: 2] ?? ""
+        let content = match[safe: 3] ?? ""
+        return ParsedTableCell(
+          text: plainTextFragment(from: content),
+          colspan: htmlAttributeInt(named: "colspan", in: attributes),
+          rowspan: htmlAttributeInt(named: "rowspan", in: attributes)
+        )
+      }
+  }
+
+  private static func htmlAttributeInt(named name: String, in attributes: String) -> Int {
+    let pattern = "\(name)\\s*=\\s*[\"']?(\\d+)[\"']?"
+    guard let value = attributes.firstMatch(of: pattern)?[safe: 1],
+          let int = Int(value)
+    else {
+      return 1
+    }
+    return max(int, 1)
   }
 
   private static func extractBalancedTag(_ tag: String, from html: String, startingAt start: String.Index) -> String.Index? {
@@ -255,12 +326,35 @@ enum OfficialArticleParser {
   }
 
   private static func extractImageSrc(from tagHTML: String) -> String? {
-    if let quoted = tagHTML.firstMatch(
-      of: #"(?:src|data-src)\s*=\s*["']([^"']+)["']"#
-    )?[safe: 1] {
+    let attributePattern = #"(?:src|data-src|fileurl|data-original|original)\s*=\s*["']([^"']+)["']"#
+    if let quoted = tagHTML.firstMatch(of: attributePattern)?[safe: 1] {
       return quoted
     }
-    return tagHTML.firstMatch(of: #"(?:src|data-src)\s*=\s*([^\s>]+)"#)?[safe: 1]
+    let unquotedPattern = #"(?:src|data-src|fileurl|data-original|original)\s*=\s*([^\s>]+)"#
+    return tagHTML.firstMatch(of: unquotedPattern)?[safe: 1]
+  }
+
+  private static func appendImageBlock(
+    src: String,
+    alt: String?,
+    baseURL: URL,
+    to blocks: inout [ArticleContentBlock]
+  ) {
+    let trimmed = src.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+
+    let caption = alt?.nilIfBlank ?? "正文插图"
+    let lowercased = trimmed.lowercased()
+
+    if lowercased.hasPrefix("data:") {
+      blocks.append(.inlineImagePayload(trimmed, caption: caption))
+      return
+    }
+
+    if let url = resolveImageURL(trimmed, baseURL: baseURL) {
+      let remoteCaption = alt?.nilIfBlank ?? url.lastPathComponent
+      blocks.append(.remoteImage(url: url, caption: remoteCaption))
+    }
   }
 
   private static func appendTextBlock(from html: Substring, to blocks: inout [ArticleContentBlock]) {
@@ -300,22 +394,6 @@ enum OfficialArticleParser {
     return URL(string: trimmed, relativeTo: baseURL)?.absoluteURL
   }
 
-  private static func decodeDataURLImage(_ src: String) -> Data? {
-    let trimmed = src.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard trimmed.lowercased().hasPrefix("data:image") else { return nil }
-    guard let comma = trimmed.firstIndex(of: ",") else { return nil }
-    let metadata = trimmed[..<comma].lowercased()
-    let payload = String(trimmed[trimmed.index(after: comma)...])
-    guard metadata.contains("base64") else { return nil }
-    guard let data = Data(base64Encoded: payload, options: .ignoreUnknownCharacters),
-          !data.isEmpty,
-          UIImage(data: data) != nil
-    else {
-      return nil
-    }
-    return data
-  }
-
   private static func parseDocuments(html: String, baseURL: URL) -> [ArticleAttachment] {
     html.matches(of: #"<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)</a>"#)
       .compactMap { match in
@@ -324,7 +402,11 @@ enum OfficialArticleParser {
               isDocumentURL(url)
         else { return nil }
         let title = (match[safe: 2] ?? url.lastPathComponent).strippingHTML.normalizedWhitespace
-        return ArticleAttachment(title: title.nilIfBlank ?? url.lastPathComponent, url: url, fileType: url.pathExtension.lowercased())
+        return ArticleAttachment(
+          title: title.nilIfBlank ?? url.lastPathComponent,
+          url: url,
+          fileType: DocumentAttachmentExtensions.fileExtension(from: url) ?? url.pathExtension.lowercased()
+        )
       }
   }
 
@@ -403,7 +485,8 @@ enum OfficialArticleParser {
         guard !text.isEmpty else { return [] }
 
         if let url = URL(string: text, relativeTo: baseURL)?.absoluteURL, isDocumentURL(url) {
-          return [ArticleAttachment(title: text, url: url, fileType: url.pathExtension.lowercased())]
+          let fileType = DocumentAttachmentExtensions.fileExtension(from: url) ?? url.pathExtension.lowercased()
+          return [ArticleAttachment(title: text, url: url, fileType: fileType)]
         }
 
         return []
@@ -411,7 +494,7 @@ enum OfficialArticleParser {
   }
 
   private static func isDocumentURL(_ url: URL) -> Bool {
-    ["pdf", "doc", "docx", "xls", "xlsx", "zip", "rar"].contains(url.pathExtension.lowercased())
+    DocumentAttachmentExtensions.isDocument(url: url)
   }
 
   private static func mergeAttachments(_ primary: [ArticleAttachment], _ secondary: [ArticleAttachment]) -> [ArticleAttachment] {

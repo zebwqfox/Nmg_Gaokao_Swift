@@ -21,9 +21,14 @@ struct ArticleDetailView: View {
     article?.documentAttachments ?? []
   }
 
-  private var showsBodyLoading: Bool {
-    isLoading && (article?.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-      && (article?.contentBlocks.isEmpty ?? true)
+  private var hasRenderedBody: Bool {
+    guard let article else { return false }
+    return !article.contentBlocks.isEmpty
+      || !article.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private var showsInlineLoadingBar: Bool {
+    isLoading && !hasRenderedBody
   }
 
   var body: some View {
@@ -33,9 +38,10 @@ struct ArticleDetailView: View {
           VStack(alignment: .leading, spacing: 20) {
             header(for: article)
 
-            if showsBodyLoading {
-              ProgressView("正在读取正文")
-                .frame(maxWidth: .infinity, minHeight: 80)
+            if showsInlineLoadingBar {
+              FeedInlineLoadingBar(message: "正在读取正文，文字将优先显示")
+            } else if isLoading {
+              FeedInlineLoadingBar(message: "正在更新正文")
             }
 
             if let errorMessage {
@@ -45,6 +51,8 @@ struct ArticleDetailView: View {
             }
 
             articleBody(for: article)
+              .animation(.easeOut(duration: 0.25), value: article.contentBlocks.count)
+              .animation(.easeOut(duration: 0.25), value: article.body.count)
 
             if !documentAttachments.isEmpty {
               VStack(alignment: .leading, spacing: 10) {
@@ -55,7 +63,7 @@ struct ArticleDetailView: View {
                     router.navigate(to: .web(title: attachment.title, url: attachment.url))
                   } label: {
                     HStack(spacing: 12) {
-                      Image(systemName: "doc")
+                      Image(systemName: attachment.systemImageName)
                         .foregroundStyle(.blue)
                       VStack(alignment: .leading, spacing: 3) {
                         Text(attachment.title)
@@ -76,6 +84,7 @@ struct ArticleDetailView: View {
                   .buttonStyle(.plain)
                 }
               }
+              .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
           }
           .padding()
@@ -122,6 +131,8 @@ struct ArticleDetailView: View {
               .textSelection(.enabled)
           case .remoteImage(let url, let caption):
             ArticleRemoteImage(url: url, caption: caption, referer: article.originalURL)
+          case .inlineImagePayload(let payload, let caption):
+            ArticleRemoteImage(inlinePayload: payload, caption: caption)
           case .inlineImage(let data, let caption):
             ArticleRemoteImage(inlineData: data, caption: caption)
           case .table(let rows):
@@ -130,10 +141,17 @@ struct ArticleDetailView: View {
         }
       }
     } else if bodyParagraphs(for: article).isEmpty {
-      Text(article.summary.isEmpty ? "这条内容可能是附件或外链，请打开原文查看。" : article.summary)
-        .font(.body)
-        .foregroundStyle(.secondary)
-        .lineSpacing(6)
+      if !article.summary.isEmpty {
+        Text(article.summary)
+          .font(.body)
+          .foregroundStyle(isLoading ? .secondary : .primary)
+          .lineSpacing(6)
+      } else {
+        Text("这条内容可能是附件或外链，请打开原文查看。")
+          .font(.body)
+          .foregroundStyle(.secondary)
+          .lineSpacing(6)
+      }
     } else {
       VStack(alignment: .leading, spacing: 14) {
         ForEach(Array(bodyParagraphs(for: article).enumerated()), id: \.offset) { _, paragraph in
@@ -183,16 +201,9 @@ struct ArticleDetailView: View {
       || !article.contentBlocks.isEmpty
     guard force || !hasBody else { return }
 
-    let showSpinner = force || !hasBody
-    if showSpinner {
-      isLoading = true
-    }
+    isLoading = true
     errorMessage = nil
-    defer {
-      if showSpinner {
-        isLoading = false
-      }
-    }
+    defer { isLoading = false }
 
     do {
       let detail = try await contentClient.fetchArticle(from: article)
@@ -203,10 +214,14 @@ struct ArticleDetailView: View {
         } else {
           existing.update(from: detail)
         }
-        fetchedDetail = existing
+        withAnimation(.easeOut(duration: 0.25)) {
+          fetchedDetail = existing
+        }
       } else {
         modelContext.insert(detail)
-        fetchedDetail = detail
+        withAnimation(.easeOut(duration: 0.25)) {
+          fetchedDetail = detail
+        }
       }
       try? modelContext.save()
     } catch is CancellationError {

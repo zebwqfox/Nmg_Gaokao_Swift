@@ -20,6 +20,8 @@ struct ContentFeedView: View {
   @State private var activeSearchTerm: String?
   @State private var feedLoadGeneration = 0
   @State private var searchTask: Task<Void, Never>?
+  @State private var loadMoreTask: Task<Void, Never>?
+  @State private var feedHeadIDs: Set<String> = []
 
   private var trimmedQuery: String {
     query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -34,15 +36,16 @@ struct ContentFeedView: View {
   }
 
   private var displayedArticles: [CachedArticle] {
-    ImportantNewsRanker.ranked(feedItems)
+    feedItems
   }
 
   private var pinnedArticles: [CachedArticle] {
-    ImportantNewsRanker.pinned(displayedArticles)
+    feedItems.filter { feedHeadIDs.contains($0.id) && ImportantNewsRanker.isPinned($0) }
   }
 
   private var regularArticles: [CachedArticle] {
-    ImportantNewsRanker.regular(from: displayedArticles)
+    let pinnedIDs = Set(pinnedArticles.map(\.id))
+    return feedItems.filter { !pinnedIDs.contains($0.id) }
   }
 
   var body: some View {
@@ -100,6 +103,7 @@ struct ContentFeedView: View {
         Section(isSearchMode ? "搜索结果" : selectedCategory.title) {
           ForEach(regularArticles) { article in
             articleRow(article, pinned: false)
+              .transition(.opacity.combined(with: .move(edge: .bottom)))
               .onAppear {
                 loadNextPageIfNeeded(current: article)
               }
@@ -107,28 +111,17 @@ struct ContentFeedView: View {
 
           if hasMorePages {
             Color.clear
-              .frame(height: 1)
+              .frame(height: 48)
               .listRowSeparator(.hidden)
               .onAppear {
                 loadMoreFromBottom()
               }
           }
 
-          if isLoadingMore {
-            HStack {
-              Spacer()
-              ProgressView("加载更多")
-              Spacer()
-            }
+          FeedLoadMoreFooter(isLoading: isLoadingMore, hasMore: hasMorePages)
             .listRowSeparator(.hidden)
-          } else if !hasMorePages, !feedItems.isEmpty {
-            Text("没有更多了")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-              .frame(maxWidth: .infinity)
-              .listRowSeparator(.hidden)
-          }
         }
+        .animation(.easeInOut(duration: 0.24), value: regularArticles.map(\.id))
       }
     }
     .navigationTitle("资讯")
@@ -169,14 +162,17 @@ struct ContentFeedView: View {
     guard hasMorePages, !isRefreshing, !isLoadingMore else { return }
     let regular = regularArticles
     guard let index = regular.firstIndex(where: { $0.id == current.id }),
-          index >= max(regular.count - 3, 0)
+          index >= max(regular.count - 5, 0)
     else { return }
     loadMoreFromBottom()
   }
 
   private func loadMoreFromBottom() {
     guard hasMorePages, !isRefreshing, !isLoadingMore else { return }
-    Task {
+    guard loadMoreTask == nil else { return }
+
+    loadMoreTask = Task {
+      defer { loadMoreTask = nil }
       if isSearchMode {
         await loadNextSearchPage()
       } else {
@@ -221,6 +217,7 @@ struct ContentFeedView: View {
     nextPage = 1
     hasMorePages = true
     feedItems = []
+    feedHeadIDs = []
     errorMessage = nil
     isRefreshing = true
     defer { isRefreshing = false }
@@ -242,16 +239,21 @@ struct ContentFeedView: View {
         perPageLimit: 30
       )
       guard generation == feedLoadGeneration else { return }
-      result.articles.forEach(upsert)
-      try? modelContext.save()
       if replacing || pageToLoad == 1 {
-        feedItems = ImportantNewsRanker.ranked(result.articles)
+        let ranked = ImportantNewsRanker.ranked(result.articles)
+        withAnimation(.easeInOut(duration: 0.24)) {
+          feedItems = ranked
+          feedHeadIDs = Set(ranked.map(\.id))
+        }
       } else {
-        feedItems = mergeArticles(feedItems, with: result.articles)
+        withAnimation(.easeInOut(duration: 0.24)) {
+          feedItems = mergeArticles(feedItems, with: result.articles)
+        }
       }
       hasMorePages = result.hasMore
       nextPage = result.page + 1
       errorMessage = nil
+      persistArticles(result.articles)
     } catch {
       guard generation == feedLoadGeneration else { return }
       if feedItems.isEmpty {
@@ -279,6 +281,7 @@ struct ContentFeedView: View {
     nextPage = 1
     hasMorePages = true
     feedItems = []
+    feedHeadIDs = []
     errorMessage = nil
     isRefreshing = true
     defer { isRefreshing = false }
@@ -302,16 +305,21 @@ struct ContentFeedView: View {
         perPageLimit: 20
       )
       guard generation == feedLoadGeneration else { return }
-      result.articles.forEach(upsert)
-      try? modelContext.save()
       if replacing || pageToLoad == 1 {
-        feedItems = ImportantNewsRanker.ranked(result.articles)
+        let ranked = ImportantNewsRanker.ranked(result.articles)
+        withAnimation(.easeInOut(duration: 0.24)) {
+          feedItems = ranked
+          feedHeadIDs = Set(ranked.map(\.id))
+        }
       } else {
-        feedItems = mergeArticles(feedItems, with: result.articles)
+        withAnimation(.easeInOut(duration: 0.24)) {
+          feedItems = mergeArticles(feedItems, with: result.articles)
+        }
       }
       hasMorePages = result.hasMore
       nextPage = result.page + 1
       errorMessage = nil
+      persistArticles(result.articles)
     } catch {
       guard generation == feedLoadGeneration else { return }
       if feedItems.isEmpty {
@@ -327,7 +335,14 @@ struct ContentFeedView: View {
     for article in incoming where seen.insert(article.id).inserted {
       merged.append(article)
     }
-    return ImportantNewsRanker.ranked(merged)
+    return merged
+  }
+
+  private func persistArticles(_ articles: [CachedArticle]) {
+    Task(priority: .utility) { @MainActor in
+      articles.forEach(upsert)
+      try? modelContext.save()
+    }
   }
 
   private func upsert(_ article: CachedArticle) {
