@@ -20,7 +20,12 @@ struct ServicesView: View {
           ForEach(officialServices) { service in
             Button {
               let token = (try? keychainStore.read(account: "official.token")) ?? nil
-              router.navigate(to: .web(title: service.name ?? "官方服务", url: service.launchURL(token: token)))
+              router.navigate(
+                to: .web(
+                  title: service.name ?? "官方服务",
+                  url: service.launchURL(token: token)
+                )
+              )
             } label: {
               OfficialStudentServiceRow(service: service)
             }
@@ -39,7 +44,17 @@ struct ServicesView: View {
         Section(group) {
           ForEach(services) { service in
             Button {
-              router.navigate(to: .web(title: service.title, url: service.url))
+              if let homeService = StudentHomeService.allCases.first(where: { $0.title == service.title }) {
+                router.navigate(to: .studentService(homeService))
+              } else {
+                let token = (try? keychainStore.read(account: "official.token")) ?? nil
+                let url = OfficialServiceResolver().launchURL(
+                  for: service,
+                  token: token,
+                  officialServices: officialServices
+                )
+                router.navigate(to: .web(title: service.title, url: url))
+              }
             } label: {
               ServiceRow(service: service)
             }

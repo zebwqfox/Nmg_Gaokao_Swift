@@ -33,6 +33,8 @@ private struct RouteView: View {
       ManagedWebView(title: title, url: url)
     case .candidateLogin:
       CandidateLoginView()
+    case .studentService(let service):
+      StudentServiceNativeView(service: service)
     }
   }
 }

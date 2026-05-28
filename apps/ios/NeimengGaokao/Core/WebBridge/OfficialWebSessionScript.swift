@@ -3,6 +3,13 @@ import WebKit
 
 enum OfficialWebSessionScript {
   static func makeUserScript(token: String?, baseUserInfoJSON: String? = nil) -> WKUserScript? {
+    guard let source = injectionSource(token: token, baseUserInfoJSON: baseUserInfoJSON) else {
+      return nil
+    }
+    return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+  }
+
+  static func injectionSource(token: String?, baseUserInfoJSON: String? = nil) -> String? {
     guard let token, !token.isEmpty else { return nil }
     let userInfoObject = baseUserInfoJSON.flatMap(jsonObject) ?? ["token": token]
     guard let tokenValue = try? encryptedStorageValue(token),
@@ -11,18 +18,19 @@ enum OfficialWebSessionScript {
       return nil
     }
 
-    let source = """
+    return """
     (function() {
       try {
         sessionStorage.setItem("STUTOKEN", \(jsString(tokenValue)));
         sessionStorage.setItem("BASEUSERINFO", \(jsString(userInfoValue)));
+        localStorage.setItem("STUTOKEN", \(jsString(tokenValue)));
+        localStorage.setItem("BASEUSERINFO", \(jsString(userInfoValue)));
         window.__NEIMENG_GAOKAO_APP_SESSION__ = true;
       } catch (error) {
         console.warn("Failed to inject official session", error);
       }
     })();
     """
-    return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
   }
 
   private static func encryptedStorageValue(_ value: Any, ttl: TimeInterval = 86_400) throws -> String {

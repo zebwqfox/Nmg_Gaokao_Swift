@@ -8,7 +8,7 @@ struct ContentFeedView: View {
 
   @Query(sort: \CachedArticle.cachedAt, order: .reverse) private var cachedArticles: [CachedArticle]
 
-  @State private var selectedCategoryID = "gaokao-policy"
+  @State private var selectedCategoryID = "notice"
   @State private var query = ""
   @State private var loadState: LoadState<[CachedArticle]> = .idle
 
@@ -23,14 +23,30 @@ struct ContentFeedView: View {
     default:
       let local = cachedArticles.filter { $0.categoryID == selectedCategoryID }
       if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        return local
+        return ImportantNewsRanker.ranked(local)
       }
-      return local.filter { article in
-        article.title.localizedCaseInsensitiveContains(query)
-          || article.summary.localizedCaseInsensitiveContains(query)
-          || article.body.localizedCaseInsensitiveContains(query)
-      }
+      return ImportantNewsRanker.ranked(
+        local.filter { article in
+          article.title.localizedCaseInsensitiveContains(query)
+            || article.summary.localizedCaseInsensitiveContains(query)
+            || article.body.localizedCaseInsensitiveContains(query)
+        }
+      )
     }
+  }
+
+  private var pinnedArticles: [CachedArticle] {
+    guard usesImportantRanking else { return [] }
+    return ImportantNewsRanker.pinned(displayedArticles)
+  }
+
+  private var regularArticles: [CachedArticle] {
+    guard usesImportantRanking else { return displayedArticles }
+    return ImportantNewsRanker.regular(from: displayedArticles)
+  }
+
+  private var usesImportantRanking: Bool {
+    ["notice", "latest-news"].contains(selectedCategoryID)
   }
 
   var body: some View {
@@ -69,14 +85,17 @@ struct ContentFeedView: View {
             ContentUnavailableView("暂无内容", systemImage: "doc.text.magnifyingglass", description: Text("换个栏目或搜索关键词试试。"))
           }
         } else {
-          Section(selectedCategory.title) {
-            ForEach(displayedArticles) { article in
-            Button {
-              router.navigate(to: .article(id: article.id))
-            } label: {
-              ArticleListRow(article: article)
+          if !pinnedArticles.isEmpty {
+            Section("重要关注") {
+              ForEach(pinnedArticles) { article in
+                articleButton(article, pinned: true)
+              }
             }
-            .buttonStyle(.plain)
+          }
+
+          Section(selectedCategory.title) {
+            ForEach(regularArticles) { article in
+              articleButton(article, pinned: false)
             }
           }
         }
@@ -104,6 +123,16 @@ struct ContentFeedView: View {
     }
   }
 
+  @ViewBuilder
+  private func articleButton(_ article: CachedArticle, pinned: Bool) -> some View {
+    Button {
+      router.navigate(to: .article(id: article.id))
+    } label: {
+      ArticleListRow(article: article, pinned: pinned)
+    }
+    .buttonStyle(.plain)
+  }
+
   private func searchOrFilter() async {
     let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !term.isEmpty else {
@@ -116,7 +145,7 @@ struct ContentFeedView: View {
       let results = try await contentClient.searchOfficialSite(query: term)
       results.forEach(upsert)
       try? modelContext.save()
-      loadState = .loaded(results)
+      loadState = .loaded(ImportantNewsRanker.ranked(results))
     } catch {
       loadState = .failed(error.localizedDescription)
     }
@@ -125,7 +154,7 @@ struct ContentFeedView: View {
   private func loadSelectedCategory() async {
     loadState = .loading
     do {
-      let articles = try await contentClient.fetchFeed(category: selectedCategory, limit: 40)
+      let articles = try await contentClient.rankedFeed(category: selectedCategory, limit: 40)
       articles.forEach(upsert)
       try? modelContext.save()
       loadState = .loaded(articles)
@@ -169,6 +198,7 @@ private struct CategoryChip: View {
 
 private struct ArticleListRow: View {
   let article: CachedArticle
+  let pinned: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -178,9 +208,24 @@ private struct ArticleListRow: View {
           .foregroundStyle(.primary)
           .lineLimit(3)
         Spacer(minLength: 12)
-        if !article.attachments.isEmpty {
+        if pinned {
+          Text("置顶")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.orange.gradient, in: Capsule())
+        } else if !article.attachments.isEmpty {
           Image(systemName: "paperclip")
             .foregroundStyle(.secondary)
+        }
+      }
+      if pinned {
+        let keywords = ImportantNewsRanker.matchedKeywords(in: article).prefix(3)
+        if !keywords.isEmpty {
+          Text(keywords.joined(separator: " · "))
+            .font(.caption)
+            .foregroundStyle(.orange)
         }
       }
       if !article.summary.isEmpty, article.summary != article.title {

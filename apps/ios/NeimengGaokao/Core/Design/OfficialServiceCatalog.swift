@@ -29,7 +29,7 @@ enum OfficialServiceCatalog {
       title: "准考证打印",
       subtitle: "进入官方打印流程，保留原站登录态",
       systemImage: "printer",
-      url: URL(string: "https://www4.nm.zsks.cn/BaseStudent/systemTotal?src=/home/TicketPrint&planCode=202610010001")!,
+      url: StudentHomeService.ticketPrint.fallbackURL(),
       requiresLogin: true,
       group: "高考"
     ),
@@ -38,7 +38,7 @@ enum OfficialServiceCatalog {
       title: "考试报名",
       subtitle: "报名、资格审核、报名状态查询",
       systemImage: "square.and.pencil",
-      url: studentPortal,
+      url: StudentHomeService.examRegistration.fallbackURL(),
       requiresLogin: true,
       group: "高考"
     ),
@@ -47,7 +47,7 @@ enum OfficialServiceCatalog {
       title: "成绩查询",
       subtitle: "成绩发布后进入官方查询入口",
       systemImage: "chart.bar.doc.horizontal",
-      url: studentPortal,
+      url: StudentHomeService.queryCenter.fallbackURL(),
       requiresLogin: true,
       group: "查询"
     ),
@@ -56,7 +56,7 @@ enum OfficialServiceCatalog {
       title: "志愿填报",
       subtitle: "官方填报页面，使用受控 WebView 打开",
       systemImage: "list.bullet.clipboard",
-      url: studentPortal,
+      url: OfficialServiceResolver.systemTotalURL(source: "/home/Filling", planCode: OfficialServiceResolver.defaultPlanCode),
       requiresLogin: true,
       group: "录取"
     ),
@@ -65,7 +65,7 @@ enum OfficialServiceCatalog {
       title: "录取查询",
       subtitle: "录取结果、投档状态等查询入口",
       systemImage: "checkmark.seal",
-      url: studentPortal,
+      url: StudentHomeService.queryCenter.fallbackURL(),
       requiresLogin: true,
       group: "录取"
     ),
@@ -74,7 +74,7 @@ enum OfficialServiceCatalog {
       title: "网上缴费",
       subtitle: "支付类流程只在官方网页内完成",
       systemImage: "creditcard",
-      url: studentPortal,
+      url: StudentHomeService.onlinePayment.fallbackURL(),
       requiresLogin: true,
       group: "常用"
     ),
@@ -83,7 +83,7 @@ enum OfficialServiceCatalog {
       title: "照片采集",
       subtitle: "进入官方照片采集与确认流程",
       systemImage: "camera",
-      url: studentPortal,
+      url: StudentHomeService.applicationProcessing.fallbackURL(),
       requiresLogin: true,
       group: "常用"
     ),

@@ -119,9 +119,9 @@ struct DashboardView: View {
       Text("常用服务")
         .font(.headline)
       LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-        ForEach(OfficialServiceCatalog.services.prefix(6)) { service in
+        ForEach(StudentHomeService.allCases) { service in
           Button {
-            router.navigate(to: .web(title: service.title, url: service.url))
+            router.navigate(to: .studentService(service))
           } label: {
             VStack(alignment: .leading, spacing: 10) {
               Image(systemName: service.systemImage)
@@ -130,7 +130,8 @@ struct DashboardView: View {
               Text(service.title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()

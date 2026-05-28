@@ -10,12 +10,12 @@ struct ManagedWebView: View {
   @State private var state = ManagedWebViewState()
 
   private var officialToken: String? {
-    guard url.host == "www4.nm.zsks.cn" else { return nil }
+    guard needsOfficialSession(for: url) else { return nil }
     return (try? keychainStore.read(account: "official.token")) ?? nil
   }
 
   private var officialBaseUserInfoJSON: String? {
-    guard url.host == "www4.nm.zsks.cn" else { return nil }
+    guard needsOfficialSession(for: url) else { return nil }
     return (try? keychainStore.read(account: "official.baseUserInfo")) ?? nil
   }
 
@@ -33,6 +33,24 @@ struct ManagedWebView: View {
           .padding(10)
           .glassEffect(.regular, in: .rect(cornerRadius: 999))
           .padding(.top, 10)
+      }
+      if let errorMessage = state.errorMessage {
+        VStack(spacing: 8) {
+          Text(errorMessage)
+            .font(.footnote)
+            .multilineTextAlignment(.center)
+            .foregroundStyle(.secondary)
+          if let retryURL = state.lastFailedURL {
+            Button("重试") {
+              state.errorMessage = nil
+              state.webView?.load(URLRequest(url: retryURL))
+            }
+            .buttonStyle(.glass)
+          }
+        }
+        .padding()
+        .nativeGlassPanel(cornerRadius: 14, tint: .orange.opacity(0.08))
+        .padding(.top, 56)
       }
     }
     .navigationTitle(title)
@@ -69,6 +87,11 @@ struct ManagedWebView: View {
       }
     }
   }
+
+  private func needsOfficialSession(for url: URL) -> Bool {
+    guard let host = url.host?.lowercased() else { return false }
+    return host.contains("nm.zsks.cn")
+  }
 }
 
 @MainActor
@@ -78,6 +101,8 @@ final class ManagedWebViewState {
   var canGoBack = false
   var canGoForward = false
   var isLoading = true
+  var errorMessage: String?
+  var lastFailedURL: URL?
 
   func update(from webView: WKWebView) {
     self.webView = webView
@@ -103,7 +128,7 @@ private struct WebViewRepresentable: UIViewRepresentable {
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.navigationDelegate = context.coordinator
     webView.allowsBackForwardNavigationGestures = true
-    webView.load(URLRequest(url: url))
+    context.coordinator.load(url, in: webView)
     state.update(from: webView)
     return webView
   }
@@ -113,15 +138,34 @@ private struct WebViewRepresentable: UIViewRepresentable {
   }
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(state: state)
+    Coordinator(
+      state: state,
+      token: token,
+      baseUserInfoJSON: baseUserInfoJSON,
+      initialURL: url
+    )
   }
 
   @MainActor
   final class Coordinator: NSObject, WKNavigationDelegate {
     let state: ManagedWebViewState
+    let token: String?
+    let baseUserInfoJSON: String?
+    let initialURL: URL
+    private var attemptedURLs = Set<String>()
 
-    init(state: ManagedWebViewState) {
+    init(state: ManagedWebViewState, token: String?, baseUserInfoJSON: String?, initialURL: URL) {
       self.state = state
+      self.token = token
+      self.baseUserInfoJSON = baseUserInfoJSON
+      self.initialURL = initialURL
+    }
+
+    func load(_ url: URL, in webView: WKWebView) {
+      attemptedURLs.insert(url.absoluteString)
+      state.errorMessage = nil
+      state.lastFailedURL = url
+      webView.load(URLRequest(url: url))
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -129,15 +173,66 @@ private struct WebViewRepresentable: UIViewRepresentable {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+      injectSession(into: webView)
+      state.errorMessage = nil
       state.update(from: webView)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-      state.update(from: webView)
+      handleFailure(error: error, webView: webView)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+      handleFailure(error: error, webView: webView)
+    }
+
+    func webView(
+      _ webView: WKWebView,
+      didReceive challenge: URLAuthenticationChallenge,
+      completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+      if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+         let trust = challenge.protectionSpace.serverTrust,
+         challenge.protectionSpace.host.contains("nm.zsks.cn")
+      {
+        completionHandler(.useCredential, URLCredential(trust: trust))
+        return
+      }
+      completionHandler(.performDefaultHandling, nil)
+    }
+
+    private func handleFailure(error: Error, webView: WKWebView) {
       state.update(from: webView)
+      let nsError = error as NSError
+      if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+        return
+      }
+
+      let failedURL = webView.url ?? state.lastFailedURL ?? initialURL
+      if let alternate = OfficialURLFallback.alternateURL(for: failedURL, excluding: attemptedURLs),
+         attemptedURLs.insert(alternate.absoluteString).inserted
+      {
+        load(alternate, in: webView)
+        return
+      }
+
+      state.errorMessage = friendlyMessage(for: error)
+      state.lastFailedURL = failedURL
+    }
+
+    private func injectSession(into webView: WKWebView) {
+      guard let source = OfficialWebSessionScript.injectionSource(token: token, baseUserInfoJSON: baseUserInfoJSON) else {
+        return
+      }
+      webView.evaluateJavaScript(source)
+    }
+
+    private func friendlyMessage(for error: Error) -> String {
+      let nsError = error as NSError
+      if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorSecureConnectionFailed {
+        return "官方站点 TLS 证书异常，已尝试 HTTP/HTTPS 切换。请稍后重试。"
+      }
+      return "页面加载失败：\(error.localizedDescription)"
     }
   }
 }

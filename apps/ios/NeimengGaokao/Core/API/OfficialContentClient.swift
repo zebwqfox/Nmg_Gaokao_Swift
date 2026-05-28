@@ -6,8 +6,9 @@ struct OfficialContentClient {
   var session: URLSession = .shared
 
   let categories: [OfficialCategory] = [
-    OfficialCategory(id: "home", title: "首页最新", kind: .latest, examType: nil, url: URL(string: "https://www.nm.zsks.cn/")!),
     OfficialCategory(id: "notice", title: "通知公告", kind: .notice, examType: nil, url: URL(string: "https://www.nm.zsks.cn/tzgg/")!),
+    OfficialCategory(id: "latest-news", title: "最新要闻", kind: .news, examType: nil, url: URL(string: "https://www.nm.zsks.cn/zxyw/")!),
+    OfficialCategory(id: "home", title: "首页最新", kind: .latest, examType: nil, url: URL(string: "https://www.nm.zsks.cn/")!),
     OfficialCategory(id: "gaokao-notice", title: "高考公告", kind: .notice, examType: "高考", url: URL(string: "https://www.nm.zsks.cn/kszs/ptgk/ggl/")!),
     OfficialCategory(id: "gaokao-policy", title: "高考政策", kind: .policy, examType: "高考", url: URL(string: "https://www.nm.zsks.cn/kszs/ptgk/zcfg/")!),
     OfficialCategory(id: "policies", title: "政策法规", kind: .policy, examType: nil, url: URL(string: "https://www.nm.zsks.cn/zszc1/")!),
@@ -19,24 +20,58 @@ struct OfficialContentClient {
   ]
 
   func fetchFeed(category: OfficialCategory, limit: Int = 30) async throws -> [CachedArticle] {
-    let html = try await fetchText(category.url)
-    return parseListPage(html: html, category: category, limit: limit)
+    let (html, resolvedURL) = try await fetchTextWithFallback(category.url)
+    let resolvedCategory = OfficialCategory(
+      id: category.id,
+      title: category.title,
+      kind: category.kind,
+      examType: category.examType,
+      url: resolvedURL
+    )
+    let articles = parseListPage(html: html, category: resolvedCategory, limit: limit)
+    return rankIfNeeded(articles, categoryID: resolvedCategory.id)
+  }
+
+  func rankedFeed(category: OfficialCategory, limit: Int = 40) async throws -> [CachedArticle] {
+    try await fetchFeed(category: category, limit: limit)
   }
 
   func fetchArticle(from listItem: CachedArticle) async throws -> CachedArticle {
     if listItem.originalURL.pathExtension.lowercased().isDocumentExtension {
       return listItem
     }
-    let html = try await fetchText(listItem.originalURL)
+    let (html, _) = try await fetchTextWithFallback(listItem.originalURL)
     return parseDetailPage(html: html, fallback: listItem)
   }
 
   func searchOfficialSite(query: String) async throws -> [CachedArticle] {
     var components = URLComponents(string: "https://www.nm.zsks.cn/web/search/375")!
     components.queryItems = [URLQueryItem(name: "content", value: query)]
-    let html = try await fetchText(components.url!)
-    let category = OfficialCategory(id: "search", title: "搜索", kind: .latest, examType: nil, url: components.url!)
-    return parseListPage(html: html, category: category, limit: 50)
+    let (html, resolvedURL) = try await fetchTextWithFallback(components.url!)
+    let category = OfficialCategory(id: "search", title: "搜索", kind: .latest, examType: nil, url: resolvedURL)
+    let articles = parseListPage(html: html, category: category, limit: 50)
+    return rankIfNeeded(articles, categoryID: category.id)
+  }
+
+  private func rankIfNeeded(_ articles: [CachedArticle], categoryID: String) -> [CachedArticle] {
+    guard ["notice", "latest-news"].contains(categoryID) else { return articles }
+    return ImportantNewsRanker.ranked(articles)
+  }
+
+  private func fetchTextWithFallback(_ url: URL) async throws -> (text: String, resolvedURL: URL) {
+    let candidates = candidateURLs(for: url)
+    var lastError: Error?
+
+    for candidate in candidates {
+      do {
+        let text = try await fetchText(candidate)
+        return (text, candidate)
+      } catch {
+        lastError = error
+      }
+    }
+
+    throw lastError ?? URLError(.cannotLoadFromNetwork)
   }
 
   private func fetchText(_ url: URL) async throws -> String {
@@ -50,6 +85,29 @@ struct OfficialContentClient {
     return String(data: data, encoding: .utf8)
       ?? String(data: data, encoding: .gb18030)
       ?? ""
+  }
+
+  private func candidateURLs(for url: URL) -> [URL] {
+    guard let scheme = url.scheme?.lowercased(),
+          let host = url.host?.lowercased(),
+          host.contains("nm.zsks.cn")
+    else {
+      return [url]
+    }
+
+    if scheme == "https", var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      components.scheme = "http"
+      if let fallback = components.url {
+        return [url, fallback]
+      }
+    } else if scheme == "http", var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      components.scheme = "https"
+      if let fallback = components.url {
+        return [url, fallback]
+      }
+    }
+
+    return [url]
   }
 
   private func parseListPage(
