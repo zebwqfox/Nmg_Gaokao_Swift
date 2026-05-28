@@ -153,6 +153,8 @@ private struct WebViewRepresentable: UIViewRepresentable {
     let baseUserInfoJSON: String?
     let initialURL: URL
     private var attemptedURLs = Set<String>()
+    private var pendingBootstrapURL: URL?
+    private var hasPerformedBootstrap = false
 
     init(state: ManagedWebViewState, token: String?, baseUserInfoJSON: String?, initialURL: URL) {
       self.state = state
@@ -162,6 +164,16 @@ private struct WebViewRepresentable: UIViewRepresentable {
     }
 
     func load(_ url: URL, in webView: WKWebView) {
+      if shouldBootstrap(from: url), !hasPerformedBootstrap {
+        hasPerformedBootstrap = true
+        pendingBootstrapURL = url
+        let home = URL(string: "https://www4.nm.zsks.cn/BaseStudent/Welcome/Index")!
+        attemptedURLs.insert(home.absoluteString)
+        state.errorMessage = nil
+        state.lastFailedURL = home
+        webView.load(URLRequest(url: home))
+        return
+      }
       attemptedURLs.insert(url.absoluteString)
       state.errorMessage = nil
       state.lastFailedURL = url
@@ -174,6 +186,7 @@ private struct WebViewRepresentable: UIViewRepresentable {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
       injectSession(into: webView)
+      bootstrapIfNeeded(on: webView)
       state.errorMessage = nil
       state.update(from: webView)
     }
@@ -225,6 +238,29 @@ private struct WebViewRepresentable: UIViewRepresentable {
         return
       }
       webView.evaluateJavaScript(source)
+    }
+
+    private func bootstrapIfNeeded(on webView: WKWebView) {
+      guard let pending = pendingBootstrapURL else { return }
+      guard let current = webView.url?.absoluteString, current.contains("/BaseStudent/Welcome/Index") else {
+        return
+      }
+      pendingBootstrapURL = nil
+      attemptedURLs.insert(pending.absoluteString)
+      state.lastFailedURL = pending
+      webView.evaluateJavaScript("window.location.href = \(quoted(pending.absoluteString));")
+    }
+
+    private func shouldBootstrap(from url: URL) -> Bool {
+      guard url.host == "www4.nm.zsks.cn" else { return false }
+      return url.path.contains("/BaseStudent/systemTotal")
+    }
+
+    private func quoted(_ value: String) -> String {
+      guard let data = try? JSONEncoder().encode(value),
+            let json = String(data: data, encoding: .utf8)
+      else { return "\"\"" }
+      return json
     }
 
     private func friendlyMessage(for error: Error) -> String {
