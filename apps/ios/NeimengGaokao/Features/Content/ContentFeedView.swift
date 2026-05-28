@@ -5,35 +5,19 @@ struct ContentFeedView: View {
   @Environment(\.contentClient) private var contentClient
 
   @State private var selectedCategoryID = "notice"
-  @State private var query = ""
   @State private var feedItems: [CachedArticle] = []
   @State private var nextPage = 1
   @State private var hasMorePages = true
   @State private var isRefreshing = false
   @State private var isLoadingMore = false
   @State private var errorMessage: String?
-  @State private var isSearchMode = false
-  @State private var activeSearchTerm: String?
   @State private var feedLoadGeneration = 0
-  @State private var searchTask: Task<Void, Never>?
   @State private var loadMoreTask: Task<Void, Never>?
   @State private var feedHeadIDs: Set<String> = []
   @State private var loadedCategoryID: String?
 
-  private var trimmedQuery: String {
-    query.trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  private var awaitingOfficialSearch: Bool {
-    !trimmedQuery.isEmpty && activeSearchTerm != trimmedQuery
-  }
-
   private var selectedCategory: OfficialCategory {
     contentClient.categories.first(where: { $0.id == selectedCategoryID }) ?? contentClient.categories[0]
-  }
-
-  private var displayedArticles: [CachedArticle] {
-    feedItems
   }
 
   private var pinnedArticles: [CachedArticle] {
@@ -56,8 +40,6 @@ struct ContentFeedView: View {
               Button {
                 guard selectedCategoryID != category.id else { return }
                 selectedCategoryID = category.id
-                query = ""
-                isSearchMode = false
               } label: {
                 CategoryChip(title: category.title, isSelected: category.id == selectedCategoryID)
               }
@@ -68,12 +50,7 @@ struct ContentFeedView: View {
         }
       }
 
-      if awaitingOfficialSearch || (isRefreshing && isSearchMode) {
-        Section {
-          ProgressView(awaitingOfficialSearch && !isRefreshing ? "准备搜索官网" : "正在搜索官网")
-            .frame(maxWidth: .infinity, minHeight: 120)
-        }
-      } else if isRefreshing, feedItems.isEmpty {
+      if isRefreshing, feedItems.isEmpty {
         Section {
           ProgressView("正在从官网获取资讯")
             .frame(maxWidth: .infinity, minHeight: 120)
@@ -82,12 +59,12 @@ struct ContentFeedView: View {
         Section {
           ContentUnavailableView("加载失败", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
         }
-      } else if displayedArticles.isEmpty {
+      } else if feedItems.isEmpty {
         Section {
           ContentUnavailableView(
-            isSearchMode ? "未找到相关内容" : "暂无内容",
+            "暂无内容",
             systemImage: "doc.text.magnifyingglass",
-            description: Text(isSearchMode ? "换个关键词试试。" : "换个栏目或搜索关键词试试。")
+            description: Text("换个栏目试试，或使用搜索页查找关键词。")
           )
         }
       } else {
@@ -99,7 +76,7 @@ struct ContentFeedView: View {
           }
         }
 
-        Section(isSearchMode ? "搜索结果" : selectedCategory.title) {
+        Section(selectedCategory.title) {
           ForEach(regularArticles) { article in
             articleRow(article, pinned: false)
               .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -123,20 +100,12 @@ struct ContentFeedView: View {
       }
     }
     .navigationTitle("资讯")
-    .searchable(text: $query, prompt: "搜索高考、政策、报名")
-    .onSubmit(of: .search) {
-      searchTask?.cancel()
-      Task { await searchOrFilter() }
-    }
-    .onChange(of: query) { _, _ in
-      scheduleOfficialSearch()
-    }
     .refreshable {
-      await refreshCurrentFeed()
+      await reloadFeed()
     }
     .toolbar {
       Button {
-        Task { await refreshCurrentFeed() }
+        Task { await reloadFeed() }
       } label: {
         Image(systemName: "arrow.clockwise")
       }
@@ -156,7 +125,7 @@ struct ContentFeedView: View {
       ArticleSessionCache.store(article)
       router.navigate(to: .article(id: article.id))
     } label: {
-      ArticleListRow(article: article, pinned: pinned)
+      FeedArticleRow(article: article, pinned: pinned)
     }
     .buttonStyle(.plain)
   }
@@ -176,47 +145,13 @@ struct ContentFeedView: View {
 
     loadMoreTask = Task {
       defer { loadMoreTask = nil }
-      if isSearchMode {
-        await loadNextSearchPage()
-      } else {
-        await loadNextPage()
-      }
-    }
-  }
-
-  private func scheduleOfficialSearch() {
-    searchTask?.cancel()
-
-    let term = trimmedQuery
-    if term.isEmpty {
-      if isSearchMode || activeSearchTerm != nil {
-        Task { await reloadFeed() }
-      }
-      return
-    }
-
-    searchTask = Task {
-      try? await Task.sleep(nanoseconds: 450_000_000)
-      guard !Task.isCancelled else { return }
-      await searchOrFilter()
-    }
-  }
-
-  private func refreshCurrentFeed() async {
-    if isSearchMode, let term = activeSearchTerm, !term.isEmpty {
-      query = term
-      await searchOrFilter()
-    } else {
-      await reloadFeed()
+      await loadNextPage()
     }
   }
 
   private func reloadFeed() async {
     feedLoadGeneration += 1
     let generation = feedLoadGeneration
-    isSearchMode = false
-    activeSearchTerm = nil
-    query = ""
     nextPage = 1
     hasMorePages = true
     feedItems = []
@@ -245,71 +180,6 @@ struct ContentFeedView: View {
       if replacing || pageToLoad == 1 {
         withAnimation(.easeInOut(duration: 0.24)) {
           feedItems = result.articles
-          feedHeadIDs = Set(result.articles.map(\.id))
-        }
-      } else {
-        withAnimation(.easeInOut(duration: 0.24)) {
-          feedItems = mergeArticles(feedItems, with: result.articles)
-        }
-      }
-      hasMorePages = result.hasMore
-      nextPage = result.page + 1
-      errorMessage = nil
-      result.articles.forEach(ArticleSessionCache.store)
-    } catch {
-      guard generation == feedLoadGeneration else { return }
-      if feedItems.isEmpty {
-        errorMessage = error.localizedDescription
-      }
-      hasMorePages = false
-    }
-  }
-
-  private func searchOrFilter() async {
-    let term = trimmedQuery
-    guard !term.isEmpty else {
-      await reloadFeed()
-      return
-    }
-
-    if activeSearchTerm == term, !feedItems.isEmpty, !isRefreshing {
-      return
-    }
-
-    feedLoadGeneration += 1
-    let generation = feedLoadGeneration
-    isSearchMode = true
-    activeSearchTerm = term
-    nextPage = 1
-    hasMorePages = true
-    feedItems = []
-    feedHeadIDs = []
-    errorMessage = nil
-    isRefreshing = true
-    defer { isRefreshing = false }
-    await loadNextSearchPage(generation: generation, replacing: true)
-  }
-
-  private func loadNextSearchPage(generation: Int? = nil, replacing: Bool = false) async {
-    guard let term = activeSearchTerm, !term.isEmpty else { return }
-    let generation = generation ?? feedLoadGeneration
-    guard generation == feedLoadGeneration else { return }
-    guard hasMorePages, !isLoadingMore else { return }
-
-    isLoadingMore = true
-    defer { isLoadingMore = false }
-
-    let pageToLoad = nextPage
-    do {
-      let result = try await contentClient.searchOfficialSitePage(
-        query: term,
-        page: pageToLoad,
-        perPageLimit: 20
-      )
-      guard generation == feedLoadGeneration else { return }
-      if replacing || pageToLoad == 1 {
-        withAnimation(.easeInOut(duration: 0.24)) {
-          feedItems = ImportantNewsRanker.sortedByDate(result.articles)
           feedHeadIDs = Set(result.articles.map(\.id))
         }
       } else {
@@ -361,56 +231,5 @@ private struct CategoryChip: View {
       .font(.subheadline.weight(.semibold))
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
-  }
-}
-
-private struct ArticleListRow: View {
-  let article: CachedArticle
-  let pinned: Bool
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(alignment: .top) {
-        Text(article.title)
-          .font(.headline)
-          .foregroundStyle(.primary)
-          .lineLimit(3)
-        Spacer(minLength: 12)
-        if pinned {
-          Text("置顶")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.orange.gradient, in: Capsule())
-        } else if !article.documentAttachments.isEmpty {
-          Image(systemName: "paperclip")
-            .foregroundStyle(.secondary)
-        }
-      }
-      if pinned {
-        let keywords = ImportantNewsRanker.matchedKeywords(in: article).prefix(3)
-        if !keywords.isEmpty {
-          Text(keywords.joined(separator: " · "))
-            .font(.caption)
-            .foregroundStyle(.orange)
-        }
-      }
-      if !article.summary.isEmpty, article.summary != article.title {
-        Text(article.summary)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .lineLimit(2)
-      }
-      HStack(spacing: 8) {
-        Text(article.categoryTitle)
-        if let publishedAt = article.publishedAt ?? OfficialArticleDateParser.date(from: article.originalURL) {
-          Text(DateFormatters.displayDate.string(from: publishedAt))
-        }
-      }
-      .font(.caption)
-      .foregroundStyle(.secondary)
-    }
-    .padding(.vertical, 6)
   }
 }
