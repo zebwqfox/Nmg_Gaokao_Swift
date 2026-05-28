@@ -29,10 +29,10 @@ struct ArticleDetailView: View {
 
   var body: some View {
     Group {
-      if let article {
+      if let currentArticle = article {
         ScrollView {
           VStack(alignment: .leading, spacing: 20) {
-            header(for: article)
+            header(for: currentArticle)
 
             if showsInlineLoadingBar {
               FeedInlineLoadingBar(message: "正在读取正文，文字将优先显示")
@@ -52,9 +52,9 @@ struct ArticleDetailView: View {
                 .foregroundStyle(.orange)
             }
 
-            articleBody(for: article)
-              .animation(.easeOut(duration: 0.25), value: article.contentBlocks.count)
-              .animation(.easeOut(duration: 0.25), value: article.body.count)
+            articleBody(for: currentArticle)
+              .animation(.easeOut(duration: 0.25), value: currentArticle.contentBlocks.count)
+              .animation(.easeOut(duration: 0.25), value: currentArticle.body.count)
 
             if !documentAttachments.isEmpty {
               VStack(alignment: .leading, spacing: 10) {
@@ -101,7 +101,7 @@ struct ArticleDetailView: View {
               Image(systemName: isFavorite ? "star.fill" : "star")
             }
             Button {
-              router.navigate(to: .web(title: "原文", url: article.originalURL))
+              router.navigate(to: .web(title: "原文", url: currentArticle.originalURL))
             } label: {
               Image(systemName: "safari")
             }
@@ -110,19 +110,19 @@ struct ArticleDetailView: View {
         .refreshable {
           await loadDetailIfNeeded(force: true)
         }
-        .task(id: articleID) {
-          isFavorite = FavoriteArticles.contains(articleID)
-          if article == nil {
-            article = ArticleSessionCache.get(articleID)
-          }
-          await loadDetailIfNeeded(force: false)
-        }
       } else if isLoading {
         ProgressView("正在加载文章")
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         ContentUnavailableView("找不到文章", systemImage: "doc.text.magnifyingglass")
       }
+    }
+    .task(id: articleID) {
+      isFavorite = FavoriteArticles.contains(articleID)
+      if article == nil {
+        article = ArticleSessionCache.get(articleID)
+      }
+      await loadDetailIfNeeded(force: false)
     }
   }
 

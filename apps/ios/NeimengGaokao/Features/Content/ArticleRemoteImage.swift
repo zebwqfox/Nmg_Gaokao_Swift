@@ -125,7 +125,7 @@ struct ArticleRemoteImage: View {
     }
   }
 
-  private static func decodeInlineImage(_ src: String) -> UIImage? {
+  nonisolated private static func decodeInlineImage(_ src: String) -> UIImage? {
     let trimmed = src.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
 
@@ -139,7 +139,7 @@ struct ArticleRemoteImage: View {
     return UIImage(data: data)
   }
 
-  private static func decodeDataURL(_ src: String) -> UIImage? {
+  nonisolated private static func decodeDataURL(_ src: String) -> UIImage? {
     guard let comma = src.firstIndex(of: ",") else { return nil }
     let metadata = src[..<comma].lowercased()
     let payload = String(src[src.index(after: comma)...])
