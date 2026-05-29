@@ -39,6 +39,8 @@ private struct RouteView: View {
       SectionArticleListView(category: category)
     case .scoreTable(let title, let pageURL, let isAdmission):
       ScoreTableView(title: title, pageURL: pageURL, isAdmission: isAdmission)
+    case .admissionQuery:
+      AdmissionQueryView()
     }
   }
 }

@@ -77,11 +77,25 @@ struct SafeGaokaoView: View {
           icon: "doc.text.magnifyingglass", tint: .orange,
           url: URL(string: "https://www.nm.zsks.cn/25gkwb/")!
         )
-        heroButton(
-          title: "录取查询", subtitle: "实时结果",
-          icon: "checkmark.seal", tint: .green,
-          url: URL(string: "https://www1.nm.zsks.cn/Gkcjcx/kslqjgcx25_qcsj.jsp")!
-        )
+        Button {
+          router.navigate(to: .admissionQuery)
+        } label: {
+          VStack(spacing: 4) {
+            Image(systemName: "checkmark.seal")
+              .font(.title2)
+              .foregroundStyle(.green)
+            Text("录取查询")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.primary)
+            Text("实时结果")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 12)
+          .nativeGlassPanel(cornerRadius: 14, tint: Color.green.opacity(0.1), interactive: true)
+        }
+        .buttonStyle(.plain)
       }
     }
     .padding()

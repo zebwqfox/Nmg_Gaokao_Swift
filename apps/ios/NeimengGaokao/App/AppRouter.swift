@@ -9,6 +9,7 @@ enum AppRoute: Hashable {
   case studentService(StudentHomeService)
   case sectionList(OfficialCategory)
   case scoreTable(title: String, pageURL: URL, isAdmission: Bool)
+  case admissionQuery
 }
 
 @MainActor
