@@ -29,6 +29,11 @@ enum OfficialSiteTrust {
     return URLSession(configuration: config, delegate: SessionDelegate(), delegateQueue: nil)
   }
 
+  /// 独立创建一个 SSL 信任代理，供外部 session 复用
+  static func makeSessionDelegate() -> URLSessionDelegate {
+    SessionDelegate()
+  }
+
   private final class SessionDelegate: NSObject, URLSessionDelegate {
     func urlSession(
       _ session: URLSession,

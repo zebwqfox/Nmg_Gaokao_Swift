@@ -15,30 +15,48 @@ struct AdmissionQueryResult {
 // MARK: - Client
 
 struct AdmissionQueryClient {
-  var session: URLSession = OfficialSiteTrust.makeSession()
+  // 专用 session：接受所有 cookie，避免 .onlyFromMainDocumentDomain 过滤掉 JSESSIONID
+  private static let querySession: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.httpCookieAcceptPolicy = .always
+    config.httpShouldSetCookies = true
+    config.timeoutIntervalForRequest = 25
+    config.timeoutIntervalForResource = 45
+    config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    config.urlCache = nil
+    return URLSession(configuration: config,
+                      delegate: OfficialSiteTrust.makeSessionDelegate(),
+                      delegateQueue: nil)
+  }()
 
   private let endpoint = URL(string: "https://www1.nm.zsks.cn/Gkcjcx/kslqjgcx25_qcsj.jsp")!
 
-  func query(ksh: String, pswd: String) async throws -> AdmissionQueryResult? {
-    let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15"
+  private let headers: [(String, String)] = [
+    ("User-Agent",      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15"),
+    ("Accept",          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+    ("Accept-Language", "zh-CN,zh;q=0.9"),
+    ("Accept-Encoding", "gzip, deflate"),
+    ("Connection",      "keep-alive"),
+  ]
 
-    // Step 1: GET 建立会话 — 服务器会发放 JSESSIONID cookie，
-    // URLSession 用 .default 共享 cookie 存储，自动带入后续请求
+  func query(ksh: String, pswd: String) async throws -> (result: AdmissionQueryResult?, debugHTML: String) {
+    let session = Self.querySession
+
+    // Step 1: GET — 服务器发放 JSESSIONID cookie
     var getReq = URLRequest(url: endpoint)
-    getReq.timeoutInterval = 15
-    getReq.setValue(ua, forHTTPHeaderField: "User-Agent")
+    headers.forEach { getReq.setValue($0.1, forHTTPHeaderField: $0.0) }
     _ = try? await session.data(for: getReq)
 
-    // Step 2: POST 查询，cookie 由 URLSession 自动携带
+    // Step 2: POST — cookie 自动携带，body 仅含考生号和密码
     var req = URLRequest(url: endpoint)
     req.httpMethod = "POST"
-    req.timeoutInterval = 20
+    headers.forEach { req.setValue($0.1, forHTTPHeaderField: $0.0) }
     req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-    req.setValue(ua, forHTTPHeaderField: "User-Agent")
-    req.setValue("https://www1.nm.zsks.cn/Gkcjcx/kslqjgcx25_qcsj.jsp", forHTTPHeaderField: "Referer")
+    req.setValue(endpoint.absoluteString, forHTTPHeaderField: "Referer")
     req.setValue("https://www1.nm.zsks.cn", forHTTPHeaderField: "Origin")
 
-    let body = "v_ksh=\(ksh.percentEncoded)&v_pswd=\(pswd.percentEncoded)&query=%E6%9F%A5+%E8%AF%A2"
+    // 不发 query= 参数（浏览器 form.submit() 也不发）
+    let body = "v_ksh=\(ksh.percentEncoded)&v_pswd=\(pswd.percentEncoded)"
     req.httpBody = body.data(using: .utf8)
 
     let (data, response) = try await session.data(for: req)
@@ -49,7 +67,7 @@ struct AdmissionQueryClient {
       ?? String(data: data, encoding: .gb18030)
       ?? ""
 
-    return parseResult(from: html)
+    return (parseResult(from: html), html)
   }
 
   // 解析结果：跳过表单 table，找第二张有 border="1" 的结果表
@@ -128,6 +146,7 @@ struct AdmissionQueryView: View {
   @State private var result: AdmissionQueryResult?
   @State private var notFound = false
   @State private var errorMessage: String?
+  @State private var debugSnippet: String?   // 解析失败时显示响应片段
 
   private let client = AdmissionQueryClient()
 
@@ -141,11 +160,29 @@ struct AdmissionQueryView: View {
         } else if let result {
           resultCard(result)
         } else if notFound {
-          ContentUnavailableView(
-            "未查到录取信息",
-            systemImage: "person.fill.questionmark",
-            description: Text("请确认考生号和密码是否正确，或暂未录取。")
-          )
+          VStack(spacing: 16) {
+            ContentUnavailableView(
+              "未查到录取信息",
+              systemImage: "person.fill.questionmark",
+              description: Text("请确认考生号和密码是否正确，或暂未录取。")
+            )
+            if let snippet = debugSnippet {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("服务器返回内容（调试）")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
+                ScrollView {
+                  Text(snippet)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 200)
+              }
+              .padding()
+              .nativeGlassPanel(cornerRadius: 12, tint: .orange.opacity(0.08))
+            }
+          }
         } else if let error = errorMessage {
           ContentUnavailableView(
             "查询失败",
@@ -275,10 +312,14 @@ struct AdmissionQueryView: View {
     errorMessage = nil
     defer { isQuerying = false }
     do {
-      if let r = try await client.query(ksh: ksh, pswd: pswd) {
+      let (r, html) = try await client.query(ksh: ksh, pswd: pswd)
+      if let r {
         result = r
+        debugSnippet = nil
       } else {
         notFound = true
+        // 取前 800 字符供调试
+        debugSnippet = String(html.prefix(800))
       }
     } catch {
       errorMessage = error.localizedDescription
