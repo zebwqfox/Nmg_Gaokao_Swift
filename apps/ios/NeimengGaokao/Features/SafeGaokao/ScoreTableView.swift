@@ -3,15 +3,38 @@ import SwiftUI
 // MARK: - Route helper
 
 extension AppRoute {
-  /// 根据文章 URL 自动决定跳转到原生分数表格还是普通文章页
+  /// 根据文章 URL 自动路由：
+  /// - tdzgzdf.html / lqzgzdf.html → 原生分数表格
+  /// - nm.zsks.cn 目录/列表页      → 原生分页列表
+  /// - 外站或 .jsp 交互页          → WebView
+  /// - 其他文章页                  → ArticleDetailView
   static func smart(for article: CachedArticle) -> AppRoute {
-    let path = article.originalURL.path
-    if path.contains("tdzgzdf") {
-      return .scoreTable(title: article.title, pageURL: article.originalURL, isAdmission: false)
+    let url = article.originalURL
+    let path = url.path
+    let host = url.host?.lowercased() ?? ""
+
+    // 精确匹配分数表格页（必须以 .html 结尾，避免误匹配目录名）
+    if path.hasSuffix("tdzgzdf.html") {
+      return .scoreTable(title: article.title, pageURL: url, isAdmission: false)
     }
-    if path.contains("lqzgzdf") {
-      return .scoreTable(title: article.title, pageURL: article.originalURL, isAdmission: true)
+    if path.hasSuffix("lqzgzdf.html") {
+      return .scoreTable(title: article.title, pageURL: url, isAdmission: true)
     }
+
+    // nm.zsks.cn 目录/列表页（以 / 结尾或无扩展名）→ 原生列表
+    if host.contains("nm.zsks.cn"), path.hasSuffix("/") || !path.contains(".") {
+      let category = OfficialCategory(
+        id: article.id, title: article.title,
+        kind: .notice, examType: nil, url: url
+      )
+      return .sectionList(category)
+    }
+
+    // 外站 URL 或 .jsp 交互页（如录取查询）→ WebView
+    if !host.contains("nm.zsks.cn") || path.hasSuffix(".jsp") {
+      return .web(title: article.title, url: url)
+    }
+
     return .article(id: article.id)
   }
 }
