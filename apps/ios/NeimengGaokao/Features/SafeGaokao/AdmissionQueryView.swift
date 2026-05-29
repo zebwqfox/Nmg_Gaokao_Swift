@@ -20,15 +20,23 @@ struct AdmissionQueryClient {
   private let endpoint = URL(string: "https://www1.nm.zsks.cn/Gkcjcx/kslqjgcx25_qcsj.jsp")!
 
   func query(ksh: String, pswd: String) async throws -> AdmissionQueryResult? {
+    let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15"
+
+    // Step 1: GET 建立会话 — 服务器会发放 JSESSIONID cookie，
+    // URLSession 用 .default 共享 cookie 存储，自动带入后续请求
+    var getReq = URLRequest(url: endpoint)
+    getReq.timeoutInterval = 15
+    getReq.setValue(ua, forHTTPHeaderField: "User-Agent")
+    _ = try? await session.data(for: getReq)
+
+    // Step 2: POST 查询，cookie 由 URLSession 自动携带
     var req = URLRequest(url: endpoint)
     req.httpMethod = "POST"
     req.timeoutInterval = 20
     req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-    req.setValue(
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15",
-      forHTTPHeaderField: "User-Agent"
-    )
-    req.setValue("https://www1.nm.zsks.cn/", forHTTPHeaderField: "Referer")
+    req.setValue(ua, forHTTPHeaderField: "User-Agent")
+    req.setValue("https://www1.nm.zsks.cn/Gkcjcx/kslqjgcx25_qcsj.jsp", forHTTPHeaderField: "Referer")
+    req.setValue("https://www1.nm.zsks.cn", forHTTPHeaderField: "Origin")
 
     let body = "v_ksh=\(ksh.percentEncoded)&v_pswd=\(pswd.percentEncoded)&query=%E6%9F%A5+%E8%AF%A2"
     req.httpBody = body.data(using: .utf8)
