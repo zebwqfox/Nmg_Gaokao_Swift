@@ -35,6 +35,67 @@ struct OfficialContentClient {
     try await fetchFeedPage(category: category, page: 1, perPageLimit: limit).articles
   }
 
+  func fetchGksContent() async throws -> GksPageContent {
+    let gksURL = URL(string: "https://www.nm.zsks.cn/ztzl/pagkpt/gks/")!
+    let (html, resolvedURL) = try await fetchTextWithFallback(gksURL)
+    let category = OfficialCategory(
+      id: "pagkpt-gks", title: "@高考生", kind: .notice, examType: nil, url: resolvedURL
+    )
+    let scopedHTML = OfficialArticleListFilter.listContentHTML(from: html)
+    let linkRegex = #"<a[^>]+href=["']([^"']+)["'][^>]*(?:title=["']([^"']*)["'])?[^>]*>(.*?)</a>"#
+    let allMatches = scopedHTML.matches(of: linkRegex)
+
+    var resources: [GksResource] = []
+    var articles: [CachedArticle] = []
+    var seen = Set<String>()
+
+    for match in allMatches {
+      guard let href = match[safe: 1],
+            !href.hasPrefix("javascript"),
+            let url = URL(string: href, relativeTo: resolvedURL)?.absoluteURL
+      else { continue }
+
+      let rawTitle = match[safe: 2]?.nilIfBlank ?? match[safe: 3] ?? ""
+      let title = rawTitle.strippingHTML.normalizedWhitespace
+      guard !title.isEmpty,
+            !OfficialArticleListFilter.navigationTitles.contains(title),
+            seen.insert(url.absoluteString).inserted
+      else { continue }
+
+      let host = url.host?.lowercased() ?? ""
+      let isStablePlatform = host.contains("chsi.com.cn")
+        || host.contains("yigaozhao.com")
+        || host.contains("smartedu.cn")
+      let isNmSite = host.contains("nm.zsks.cn")
+      let isNmArticle = isNmSite && OfficialArticleListFilter.isArticleURL(url)
+      let isNmCategory = isNmSite && !OfficialArticleListFilter.isArticleURL(url)
+        && !url.absoluteString.hasSuffix("/gks/")
+      let isWeChat = host.contains("weixin.qq.com")
+
+      if isStablePlatform || isNmCategory {
+        resources.append(GksResource(id: stableID(url.absoluteString), title: title, url: url))
+      } else if isNmArticle {
+        let date = OfficialArticleDateParser.resolvedDate(
+          listDate: nearbyDate(for: match.fullMatch, in: scopedHTML), url: url
+        )
+        articles.append(CachedArticle(
+          id: stableID(url.absoluteString),
+          categoryID: category.id, categoryTitle: category.title, kind: category.kind,
+          title: title, summary: title, publishedAt: date, originalURL: url
+        ))
+      } else if isWeChat, title.count > 5 {
+        let date = nearbyDate(for: match.fullMatch, in: scopedHTML)
+        articles.append(CachedArticle(
+          id: stableID(url.absoluteString),
+          categoryID: category.id, categoryTitle: category.title, kind: category.kind,
+          title: title, summary: title, publishedAt: date, originalURL: url
+        ))
+      }
+    }
+
+    return GksPageContent(resources: resources, articles: Array(articles.prefix(10)))
+  }
+
   func rankedFeed(category: OfficialCategory, limit: Int = 40) async throws -> [CachedArticle] {
     try await fetchFeed(category: category, limit: limit)
   }

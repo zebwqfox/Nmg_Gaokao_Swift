@@ -31,6 +31,17 @@ struct OfficialCategory: Identifiable, Hashable {
   let url: URL
 }
 
+struct GksResource: Identifiable {
+  let id: String
+  let title: String
+  let url: URL
+}
+
+struct GksPageContent {
+  let resources: [GksResource]
+  let articles: [CachedArticle]
+}
+
 struct ArticleAttachment: Identifiable, Hashable, Codable {
   let id: UUID
   let title: String

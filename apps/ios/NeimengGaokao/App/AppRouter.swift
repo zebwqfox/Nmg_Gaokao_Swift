@@ -7,6 +7,7 @@ enum AppRoute: Hashable {
   case web(title: String, url: URL)
   case candidateLogin
   case studentService(StudentHomeService)
+  case sectionList(OfficialCategory)
 }
 
 @MainActor

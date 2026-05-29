@@ -35,6 +35,8 @@ private struct RouteView: View {
       CandidateLoginView()
     case .studentService(let service):
       StudentServiceNativeView(service: service)
+    case .sectionList(let category):
+      SectionArticleListView(category: category)
     }
   }
 }
