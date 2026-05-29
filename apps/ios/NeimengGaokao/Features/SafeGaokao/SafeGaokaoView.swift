@@ -196,7 +196,7 @@ struct SafeGaokaoView: View {
       ForEach(Array(displayed.enumerated()), id: \.element.id) { index, article in
         Button {
           ArticleSessionCache.store(article)
-          router.navigate(to: .article(id: article.id))
+          router.navigate(to: .smart(for: article))
         } label: {
           HStack(alignment: .top, spacing: 10) {
             Circle()
@@ -267,7 +267,7 @@ struct SafeGaokaoView: View {
       ForEach(Array(displayed.enumerated()), id: \.element.id) { index, article in
         Button {
           ArticleSessionCache.store(article)
-          router.navigate(to: .article(id: article.id))
+          router.navigate(to: .smart(for: article))
         } label: {
           HStack(alignment: .top, spacing: 8) {
             Text(article.title)

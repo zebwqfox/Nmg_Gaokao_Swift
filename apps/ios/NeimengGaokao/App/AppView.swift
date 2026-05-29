@@ -37,6 +37,8 @@ private struct RouteView: View {
       StudentServiceNativeView(service: service)
     case .sectionList(let category):
       SectionArticleListView(category: category)
+    case .scoreTable(let title, let pageURL, let isAdmission):
+      ScoreTableView(title: title, pageURL: pageURL, isAdmission: isAdmission)
     }
   }
 }
