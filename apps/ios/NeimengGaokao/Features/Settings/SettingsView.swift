@@ -78,7 +78,6 @@ struct SettingsView: View {
 
   private func clearCredentials() {
     keychainStore.delete(account: "official.idNumber")
-    keychainStore.delete(account: "official.password")
     keychainStore.delete(account: "official.token")
     keychainStore.delete(account: "official.baseUserInfo")
     refreshCredentialStatus()

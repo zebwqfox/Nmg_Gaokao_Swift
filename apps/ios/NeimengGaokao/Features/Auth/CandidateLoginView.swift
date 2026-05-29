@@ -98,7 +98,6 @@ struct CandidateLoginView: View {
       }
 
       try keychainStore.save(idNumber, account: "official.idNumber")
-      try keychainStore.save(password, account: "official.password")
       guard let token = response.data?.token, !token.isEmpty else {
         statusText = "官方接口未返回登录令牌，请稍后重试。"
         refreshCaptcha()

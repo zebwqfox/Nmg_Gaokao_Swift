@@ -2,6 +2,7 @@ import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable, Hashable {
   case content
+  case safeGaokao
   case search
   case calendar
   case settings
@@ -13,6 +14,8 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
     switch self {
     case .content:
       ContentFeedView()
+    case .safeGaokao:
+      SafeGaokaoView()
     case .search:
       ContentSearchView()
     case .calendar:
@@ -27,6 +30,8 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
     switch self {
     case .content:
       Label("资讯", systemImage: "newspaper")
+    case .safeGaokao:
+      Label("平安高考", systemImage: "shield.checkered")
     case .search:
       Label("搜索", systemImage: "magnifyingglass")
     case .calendar:
