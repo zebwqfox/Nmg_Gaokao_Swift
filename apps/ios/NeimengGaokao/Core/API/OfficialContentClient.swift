@@ -345,7 +345,7 @@ private extension String {
   }
 }
 
-private extension String.Encoding {
+extension String.Encoding {
   static let gb18030 = String.Encoding(
     rawValue: CFStringConvertEncodingToNSStringEncoding(
       CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
