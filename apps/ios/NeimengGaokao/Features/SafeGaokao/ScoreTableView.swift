@@ -21,8 +21,13 @@ extension AppRoute {
       return .scoreTable(title: article.title, pageURL: url, isAdmission: true)
     }
 
-    // nm.zsks.cn 目录/列表页（以 / 结尾或无扩展名）→ 原生列表
-    if host.contains("nm.zsks.cn"), path.hasSuffix("/") || !path.contains(".") {
+    // 学生门户子域（www4/www1）→ WebView，不要当列表页
+    if host == "www4.nm.zsks.cn" || host == "www1.nm.zsks.cn" {
+      return .web(title: article.title, url: url)
+    }
+
+    // www.nm.zsks.cn 目录/列表页（以 / 结尾或无扩展名）→ 原生列表
+    if host == "www.nm.zsks.cn", path.hasSuffix("/") || !path.contains(".") {
       let category = OfficialCategory(
         id: article.id, title: article.title,
         kind: .notice, examType: nil, url: url
@@ -30,7 +35,7 @@ extension AppRoute {
       return .sectionList(category)
     }
 
-    // 外站 URL 或 .jsp 交互页（如录取查询）→ WebView
+    // 外站或 .jsp 交互页 → WebView
     if !host.contains("nm.zsks.cn") || path.hasSuffix(".jsp") {
       return .web(title: article.title, url: url)
     }
@@ -227,14 +232,17 @@ private struct EnrollmentScoreRowView: View {
     VStack(alignment: .leading, spacing: 6) {
       HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 2) {
-          Text(row.PCMC)
+          let hasDistinctYXMC = (row.YXMC?.isEmpty == false) && row.YXMC != row.PCMC
+          // 院校名（YXMC）作为主标题；批次名（PCMC）作为副标题
+          Text(hasDistinctYXMC ? row.YXMC! : row.PCMC)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.primary)
             .lineLimit(2)
-          if let yxmc = row.YXMC, !yxmc.isEmpty, yxmc != row.PCMC {
-            Text(yxmc)
+          if hasDistinctYXMC {
+            Text(row.PCMC)
               .font(.caption)
               .foregroundStyle(.secondary)
+              .lineLimit(1)
           }
         }
         Spacer()

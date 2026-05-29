@@ -124,6 +124,7 @@ private struct WebViewRepresentable: UIViewRepresentable {
 
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.navigationDelegate = context.coordinator
+    webView.uiDelegate = context.coordinator
     webView.allowsBackForwardNavigationGestures = true
     context.coordinator.load(url, in: webView)
     state.update(from: webView)
@@ -144,7 +145,7 @@ private struct WebViewRepresentable: UIViewRepresentable {
   }
 
   @MainActor
-  final class Coordinator: NSObject, WKNavigationDelegate {
+  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     let state: ManagedWebViewState
     let token: String?
     let baseUserInfoJSON: String?
@@ -251,6 +252,21 @@ private struct WebViewRepresentable: UIViewRepresentable {
             let json = String(data: data, encoding: .utf8)
       else { return "\"\"" }
       return json
+    }
+
+    // MARK: WKUIDelegate
+
+    // target="_blank" 链接：在当前 WebView 内打开，避免点击无反应
+    func webView(
+      _ webView: WKWebView,
+      createWebViewWith configuration: WKWebViewConfiguration,
+      for navigationAction: WKNavigationAction,
+      windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+      if let url = navigationAction.request.url {
+        load(url, in: webView)
+      }
+      return nil
     }
 
     private func friendlyMessage(for error: Error) -> String {

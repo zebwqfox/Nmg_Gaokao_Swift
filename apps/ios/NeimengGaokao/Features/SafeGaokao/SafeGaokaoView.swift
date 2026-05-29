@@ -167,7 +167,7 @@ struct SafeGaokaoView: View {
         Button {
           router.navigate(to: .web(title: res.title, url: res.url))
         } label: {
-          let meta = Self.resourceMeta(for: res.url)
+          let meta = Self.resourceMeta(for: res.url, title: res.title)
           VStack(alignment: .leading, spacing: 6) {
             Image(systemName: meta.icon)
               .font(.title3)
@@ -397,7 +397,7 @@ struct SafeGaokaoView: View {
     let tint: Color
   }
 
-  private static func resourceMeta(for url: URL) -> ResourceMeta {
+  private static func resourceMeta(for url: URL, title: String = "") -> ResourceMeta {
     let host = url.host?.lowercased() ?? ""
     let path = url.path.lowercased()
     if host.contains("chsi.com.cn") {
@@ -409,13 +409,16 @@ struct SafeGaokaoView: View {
     if host.contains("smartedu.cn") {
       return ResourceMeta(displayTitle: "志愿指导", icon: "graduationcap.fill", tint: .purple)
     }
-    if path.contains("zsjh") {
+    if path.contains("zsjh") || title.contains("招生计划") {
       return ResourceMeta(displayTitle: "招生计划", icon: "list.bullet.rectangle.fill", tint: .green)
     }
-    if path.contains("25gkwb") || path.contains("zszc") {
-      return ResourceMeta(displayTitle: "志愿章程", icon: "doc.text.fill", tint: .orange)
-    }
-    return ResourceMeta(displayTitle: "资源链接", icon: "link.circle.fill", tint: .secondary)
+    // 兜底：用标题前5字作为显示名，避免"资源链接"
+    let short = String(title.prefix(5))
+    return ResourceMeta(
+      displayTitle: short.isEmpty ? "资源" : short,
+      icon: "link.circle.fill",
+      tint: .secondary
+    )
   }
 
   // 首次加载完成前的回退静态卡

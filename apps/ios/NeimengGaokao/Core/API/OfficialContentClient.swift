@@ -66,13 +66,15 @@ struct OfficialContentClient {
       let isStablePlatform = host.contains("chsi.com.cn")
         || host.contains("yigaozhao.com")
         || host.contains("smartedu.cn")
-      let isNmSite = host.contains("nm.zsks.cn")
+      let isNmSite = host == "www.nm.zsks.cn"
       let isNmArticle = isNmSite && OfficialArticleListFilter.isArticleURL(url)
-      let isNmCategory = isNmSite && !OfficialArticleListFilter.isArticleURL(url)
-        && !url.absoluteString.hasSuffix("/gks/")
+      // nm.zsks.cn 资源卡：只认招生计划相关路径，其余目录链接都是导航噪音
+      let isKnownNmResource = isNmSite
+        && !OfficialArticleListFilter.isArticleURL(url)
+        && url.path.lowercased().contains("zsjh")
       let isWeChat = host.contains("weixin.qq.com")
 
-      if isStablePlatform || isNmCategory {
+      if isStablePlatform || isKnownNmResource {
         resources.append(GksResource(id: stableID(url.absoluteString), title: title, url: url))
       } else if isNmArticle {
         let date = OfficialArticleDateParser.resolvedDate(
