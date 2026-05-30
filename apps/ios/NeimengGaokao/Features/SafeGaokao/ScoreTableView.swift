@@ -3,30 +3,21 @@ import SwiftUI
 // MARK: - Route helper
 
 extension AppRoute {
-  /// 根据文章 URL 自动路由：
-  /// - tdzgzdf.html / lqzgzdf.html → 原生分数表格
-  /// - nm.zsks.cn 目录/列表页      → 原生分页列表
-  /// - 外站或 .jsp 交互页          → WebView
-  /// - 其他文章页                  → ArticleDetailView
+  /// 根据文章 URL 自动路由
   static func smart(for article: CachedArticle) -> AppRoute {
     let url = article.originalURL
     let path = url.path
     let host = url.host?.lowercased() ?? ""
 
-    // 精确匹配分数表格页（必须以 .html 结尾，避免误匹配目录名）
     if path.hasSuffix("tdzgzdf.html") {
       return .scoreTable(title: article.title, pageURL: url, isAdmission: false)
     }
     if path.hasSuffix("lqzgzdf.html") {
       return .scoreTable(title: article.title, pageURL: url, isAdmission: true)
     }
-
-    // 学生门户子域（www4/www1）→ WebView，不要当列表页
     if host == "www4.nm.zsks.cn" || host == "www1.nm.zsks.cn" {
       return .web(title: article.title, url: url)
     }
-
-    // www.nm.zsks.cn 目录/列表页（以 / 结尾或无扩展名）→ 原生列表
     if host == "www.nm.zsks.cn", path.hasSuffix("/") || !path.contains(".") {
       let category = OfficialCategory(
         id: article.id, title: article.title,
@@ -34,82 +25,75 @@ extension AppRoute {
       )
       return .sectionList(category)
     }
-
-    // 外站或 .jsp 交互页 → WebView
     if !host.contains("nm.zsks.cn") || path.hasSuffix(".jsp") {
       return .web(title: article.title, url: url)
     }
-
     return .article(id: article.id)
   }
 }
 
-// MARK: - ScoreTableView
+// MARK: - ScoreTableView (院校列表)
 
 struct ScoreTableView: View {
   let title: String
   let pageURL: URL
   let isAdmission: Bool
 
-  @State private var enrollmentRows: [EnrollmentScoreRow] = []
-  @State private var admissionRows: [AdmissionScoreRow] = []
+  @State private var items: [ScoreItem] = []
+  @State private var categories: [String] = ["全部"]
+  @State private var groups: [SchoolScoreGroup] = []
   @State private var isLoading = false
   @State private var errorMessage: String?
   @State private var searchText = ""
-  @State private var selectedKL = "全部"
+  @State private var selectedCategory = "全部"
 
   private let client = ScoreTableClient()
 
-  private var subjectCategories: [String] {
-    var seen = Set<String>()
-    var result = ["全部"]
-    let allKL = isAdmission
-      ? admissionRows.map(\.KLMC)
-      : enrollmentRows.map(\.KLMC)
-    for kl in allKL where seen.insert(kl).inserted {
-      result.append(kl)
-    }
-    return result
-  }
-
   var body: some View {
     VStack(spacing: 0) {
-      filterBar
-      Divider()
+      if !isLoading, errorMessage == nil, !items.isEmpty {
+        categoryBar
+        Divider()
+      }
       content
     }
     .background(ClaudeTheme.surface.ignoresSafeArea())
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
-    .searchable(text: $searchText, prompt: isAdmission ? "搜索院校或专业" : "搜索批次或院校")
+    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "搜索院校或专业")
     .task { await load() }
+    .onChange(of: searchText) { recomputeGroups() }
+    .onChange(of: selectedCategory) { recomputeGroups() }
   }
 
-  // MARK: Filter bar
+  private func recomputeGroups() {
+    groups = ScoreGrouping.groups(from: items, category: selectedCategory, query: searchText)
+  }
 
-  private var filterBar: some View {
+  // MARK: Category filter
+
+  private var categoryBar: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
-        ForEach(subjectCategories, id: \.self) { kl in
+        ForEach(categories, id: \.self) { cat in
+          let selected = selectedCategory == cat
           Button {
-            selectedKL = kl
+            selectedCategory = cat
           } label: {
-            Text(kl)
+            Text(cat)
               .font(.caption.weight(.semibold))
-              .foregroundStyle(selectedKL == kl ? .white : ClaudeTheme.textSecondary)
+              .foregroundStyle(selected ? .white : ClaudeTheme.textSecondary)
               .padding(.horizontal, 14)
               .padding(.vertical, 7)
-              .background(selectedKL == kl ? ClaudeTheme.primary : ClaudeTheme.surfaceCard)
+              .background(selected ? ClaudeTheme.primary : ClaudeTheme.surfaceCard)
               .overlay(
-                Capsule().stroke(
-                  selectedKL == kl ? ClaudeTheme.primary : ClaudeTheme.border,
-                  lineWidth: 0.75
-                )
+                Capsule().stroke(selected ? ClaudeTheme.primary : ClaudeTheme.border, lineWidth: 0.75)
               )
               .clipShape(Capsule())
           }
           .buttonStyle(.plain)
-          .animation(.easeOut(duration: 0.15), value: selectedKL)
+          .animation(.easeOut(duration: 0.15), value: selectedCategory)
         }
       }
       .padding(.horizontal, 16)
@@ -125,248 +109,250 @@ struct ScoreTableView: View {
     if isLoading {
       VStack(spacing: 12) {
         ProgressView().tint(ClaudeTheme.primary)
-        Text("正在加载数据")
+        Text("正在加载分数数据")
           .font(.subheadline)
           .foregroundStyle(ClaudeTheme.textSecondary)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if let error = errorMessage {
+      ContentUnavailableView("加载失败", systemImage: "wifi.exclamationmark", description: Text(error))
+    } else if groups.isEmpty {
       ContentUnavailableView(
-        "加载失败",
-        systemImage: "wifi.exclamationmark",
-        description: Text(error)
+        searchText.isEmpty ? "暂无数据" : "无匹配结果",
+        systemImage: "doc.text.magnifyingglass"
       )
-    } else if isAdmission {
-      admissionList
     } else {
-      enrollmentList
+      schoolList
     }
   }
 
-  // MARK: Enrollment list (投档)
-
-  private var filteredEnrollment: [EnrollmentScoreRow] {
-    enrollmentRows
-      .filter { row in
-        (selectedKL == "全部" || row.KLMC == selectedKL)
-        && (searchText.isEmpty
-          || (row.PCMC.localizedCaseInsensitiveContains(searchText))
-          || (row.YXMC?.localizedCaseInsensitiveContains(searchText) == true))
-      }
-      .sorted { ($0.minScore ?? 0) > ($1.minScore ?? 0) }
-  }
-
-  private var enrollmentList: some View {
-    Group {
-      if filteredEnrollment.isEmpty {
-        ContentUnavailableView("无匹配结果", systemImage: "doc.text.magnifyingglass")
-      } else {
-        List(filteredEnrollment) { row in
-          EnrollmentScoreRowView(row: row)
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+  private var schoolList: some View {
+    ScrollView {
+      LazyVStack(spacing: 10) {
+        // 顶部统计
+        HStack {
+          Text("共 \(groups.count) 所院校")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(ClaudeTheme.textTertiary)
+          Spacer()
+          Text(isAdmission ? "录取分数线" : "投档分数线")
+            .font(.caption)
+            .foregroundStyle(ClaudeTheme.textTertiary)
         }
-        .listStyle(.plain)
-        .overlay(alignment: .bottom) {
-          countBadge(filteredEnrollment.count)
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+
+        ForEach(groups) { group in
+          NavigationLink {
+            ScoreSchoolDetailView(group: group, isAdmission: isAdmission)
+          } label: {
+            SchoolGroupRow(group: group, isAdmission: isAdmission)
+          }
+          .buttonStyle(.plain)
         }
       }
+      .padding(16)
     }
-  }
-
-  // MARK: Admission list (录取)
-
-  private var filteredAdmission: [AdmissionScoreRow] {
-    admissionRows
-      .filter { row in
-        (selectedKL == "全部" || row.KLMC == selectedKL)
-        && (searchText.isEmpty
-          || row.YXMC.localizedCaseInsensitiveContains(searchText)
-          || (row.ZYMC?.localizedCaseInsensitiveContains(searchText) == true)
-          || row.PCMC.localizedCaseInsensitiveContains(searchText))
-      }
-      .sorted { ($0.minScore ?? 0) > ($1.minScore ?? 0) }
-  }
-
-  private var admissionList: some View {
-    Group {
-      if filteredAdmission.isEmpty {
-        ContentUnavailableView("无匹配结果", systemImage: "doc.text.magnifyingglass")
-      } else {
-        List(filteredAdmission) { row in
-          AdmissionScoreRowView(row: row)
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-        }
-        .listStyle(.plain)
-        .overlay(alignment: .bottom) {
-          countBadge(filteredAdmission.count)
-        }
-      }
-    }
-  }
-
-  private func countBadge(_ count: Int) -> some View {
-    Text("\(count) 条")
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(ClaudeTheme.textTertiary)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 5)
-      .background(ClaudeTheme.surfaceCard)
-      .overlay(Capsule().stroke(ClaudeTheme.border, lineWidth: 0.75))
-      .clipShape(Capsule())
-      .padding(.bottom, 12)
   }
 
   // MARK: Load
 
   private func load() async {
-    guard !isLoading else { return }
+    guard !isLoading, items.isEmpty else { return }
     isLoading = true
     errorMessage = nil
     defer { isLoading = false }
     do {
-      if isAdmission {
-        admissionRows = try await client.fetchAdmissionScores(pageURL: pageURL)
-      } else {
-        enrollmentRows = try await client.fetchEnrollmentScores(pageURL: pageURL)
-      }
+      let loaded = isAdmission
+        ? try await client.fetchAdmissionItems(pageURL: pageURL)
+        : try await client.fetchEnrollmentItems(pageURL: pageURL)
+      items = loaded
+      categories = ["全部"] + ScoreGrouping.categories(from: loaded)
+      recomputeGroups()
     } catch {
       errorMessage = error.localizedDescription
     }
   }
 }
 
-// MARK: - Row views
+// MARK: - School group row
 
-private struct EnrollmentScoreRowView: View {
-  let row: EnrollmentScoreRow
+private struct SchoolGroupRow: View {
+  let group: SchoolScoreGroup
+  let isAdmission: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(alignment: .top) {
-        VStack(alignment: .leading, spacing: 2) {
-          let hasDistinctYXMC = (row.YXMC?.isEmpty == false) && row.YXMC != row.PCMC
-          Text(hasDistinctYXMC ? row.YXMC! : row.PCMC)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(ClaudeTheme.textPrimary)
-            .lineLimit(2)
-          if hasDistinctYXMC {
-            Text(row.PCMC)
-              .font(.caption)
-              .foregroundStyle(ClaudeTheme.textTertiary)
-              .lineLimit(1)
+    HStack(spacing: 12) {
+      VStack(alignment: .leading, spacing: 5) {
+        Text(group.school)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(ClaudeTheme.textPrimary)
+          .lineLimit(2)
+          .multilineTextAlignment(.leading)
+        HStack(spacing: 8) {
+          metaChip(icon: "list.bullet", text: isAdmission ? "\(group.itemCount)个专业" : "\(group.itemCount)个专业组")
+          if group.totalPeople > 0 {
+            metaChip(icon: "person.2", text: "\(group.totalPeople)人")
           }
         }
-        Spacer()
-        ScorePillView(min: row.ZDF, max: row.ZGF, count: row.TDRS, countLabel: "投档")
       }
-      HStack(spacing: 8) {
-        klChip(row.KLMC)
-        if let yw = row.ZDF_YW { scoreChip("语", yw) }
-        if let sx = row.ZDF_SX { scoreChip("数", sx) }
-        if let wy = row.ZDF_WY { scoreChip("外", wy) }
+      Spacer(minLength: 8)
+
+      // 分数区间
+      VStack(alignment: .trailing, spacing: 1) {
+        if let min = group.minScore {
+          Text("\(min)")
+            .font(.title3.weight(.bold).monospacedDigit())
+            .foregroundStyle(ClaudeTheme.primary)
+          Text("最低分")
+            .font(.caption2)
+            .foregroundStyle(ClaudeTheme.textTertiary)
+        }
       }
+      Image(systemName: "chevron.right")
+        .font(.caption)
+        .foregroundStyle(ClaudeTheme.textTertiary)
     }
-    .padding(.vertical, 4)
+    .padding(14)
+    .background(ClaudeTheme.surfaceCard)
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(ClaudeTheme.border, lineWidth: 0.75)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 
-  private func scoreChip(_ label: String, _ value: String) -> some View {
-    HStack(spacing: 2) {
-      Text(label).foregroundStyle(ClaudeTheme.textTertiary)
-      Text(value).foregroundStyle(ClaudeTheme.textPrimary)
+  private func metaChip(icon: String, text: String) -> some View {
+    HStack(spacing: 3) {
+      Image(systemName: icon).font(.caption2)
+      Text(text).font(.caption2)
     }
-    .font(.caption.monospacedDigit())
-    .padding(.horizontal, 6)
-    .padding(.vertical, 3)
-    .background(ClaudeTheme.surface)
-    .overlay(RoundedRectangle(cornerRadius: 4).stroke(ClaudeTheme.border, lineWidth: 0.75))
-    .clipShape(RoundedRectangle(cornerRadius: 4))
-  }
-
-  private func klChip(_ kl: String) -> some View {
-    Text(kl)
-      .font(.caption2.weight(.medium))
-      .foregroundStyle(ClaudeTheme.primary)
-      .padding(.horizontal, 6)
-      .padding(.vertical, 3)
-      .background(ClaudeTheme.primarySoft)
-      .overlay(RoundedRectangle(cornerRadius: 4).stroke(ClaudeTheme.primary.opacity(0.25), lineWidth: 0.75))
-      .clipShape(RoundedRectangle(cornerRadius: 4))
+    .foregroundStyle(ClaudeTheme.textTertiary)
   }
 }
 
-private struct AdmissionScoreRowView: View {
-  let row: AdmissionScoreRow
+// MARK: - School detail (专业列表)
+
+struct ScoreSchoolDetailView: View {
+  let group: SchoolScoreGroup
+  let isAdmission: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(alignment: .top) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(row.YXMC)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(ClaudeTheme.textPrimary)
-          if let zy = row.ZYMC, !zy.isEmpty {
-            Text(zy)
-              .font(.caption)
-              .foregroundStyle(ClaudeTheme.textSecondary)
-              .lineLimit(2)
+    ScrollView {
+      VStack(spacing: 14) {
+        summaryCard
+        ForEach(group.items) { item in
+          ScoreItemRow(item: item, isAdmission: isAdmission)
+        }
+      }
+      .padding(16)
+    }
+    .background(ClaudeTheme.surface.ignoresSafeArea())
+    .navigationTitle(group.school)
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private var summaryCard: some View {
+    HStack(spacing: 0) {
+      summaryStat(value: group.minScore.map(String.init) ?? "—", label: "最低分", accent: ClaudeTheme.primary)
+      divider
+      summaryStat(value: group.maxScore.map(String.init) ?? "—", label: "最高分", accent: ClaudeTheme.info)
+      divider
+      summaryStat(value: "\(group.itemCount)", label: isAdmission ? "专业" : "专业组", accent: ClaudeTheme.textSecondary)
+      if group.totalPeople > 0 {
+        divider
+        summaryStat(value: "\(group.totalPeople)", label: "人数", accent: ClaudeTheme.success)
+      }
+    }
+    .padding(.vertical, 16)
+    .frame(maxWidth: .infinity)
+    .background(ClaudeTheme.surfaceCard)
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(ClaudeTheme.border, lineWidth: 0.75)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  private func summaryStat(value: String, label: String, accent: Color) -> some View {
+    VStack(spacing: 3) {
+      Text(value)
+        .font(.title3.weight(.bold).monospacedDigit())
+        .foregroundStyle(accent)
+      Text(label)
+        .font(.caption2)
+        .foregroundStyle(ClaudeTheme.textTertiary)
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private var divider: some View {
+    Rectangle()
+      .fill(ClaudeTheme.border)
+      .frame(width: 0.75, height: 28)
+  }
+}
+
+// MARK: - Score item row
+
+private struct ScoreItemRow: View {
+  let item: ScoreItem
+  let isAdmission: Bool
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(item.title)
+          .font(.subheadline.weight(.medium))
+          .foregroundStyle(ClaudeTheme.textPrimary)
+          .lineLimit(2)
+          .multilineTextAlignment(.leading)
+        if let sub = item.subtitle, !sub.isEmpty {
+          Text(sub)
+            .font(.caption)
+            .foregroundStyle(ClaudeTheme.textTertiary)
+            .lineLimit(1)
+        }
+        if !item.subjectScores.isEmpty {
+          HStack(spacing: 6) {
+            ForEach(item.subjectScores) { s in
+              HStack(spacing: 2) {
+                Text(s.label).foregroundStyle(ClaudeTheme.textTertiary)
+                Text(s.value).foregroundStyle(ClaudeTheme.textSecondary)
+              }
+              .font(.caption2.monospacedDigit())
+            }
           }
         }
-        Spacer()
-        ScorePillView(min: row.ZDF, max: row.ZGF, count: row.LQRS, countLabel: "录取")
       }
-      HStack(spacing: 6) {
-        Text(row.KLMC)
-          .font(.caption2)
-          .foregroundStyle(ClaudeTheme.success)
-          .padding(.horizontal, 6)
-          .padding(.vertical, 3)
-          .background(ClaudeTheme.success.opacity(0.08))
-          .overlay(RoundedRectangle(cornerRadius: 4).stroke(ClaudeTheme.success.opacity(0.25), lineWidth: 0.75))
-          .clipShape(RoundedRectangle(cornerRadius: 4))
-        Text(row.PCMC)
-          .font(.caption2)
-          .foregroundStyle(ClaudeTheme.textSecondary)
-          .padding(.horizontal, 6)
-          .padding(.vertical, 3)
-          .background(ClaudeTheme.surfaceCard)
-          .overlay(RoundedRectangle(cornerRadius: 4).stroke(ClaudeTheme.border, lineWidth: 0.75))
-          .clipShape(RoundedRectangle(cornerRadius: 4))
-        if let jhl = row.JHLBMC, !jhl.isEmpty {
-          Text(jhl)
+      Spacer(minLength: 8)
+
+      VStack(alignment: .trailing, spacing: 1) {
+        HStack(spacing: 4) {
+          if let min = item.minScore {
+            Text("\(min)")
+              .font(.headline.monospacedDigit())
+              .foregroundStyle(ClaudeTheme.primary)
+          }
+          if let max = item.maxScore {
+            Text("~\(max)")
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(ClaudeTheme.textTertiary)
+          }
+        }
+        if let count = item.peopleCount {
+          Text("\(count)\(isAdmission ? "录取" : "投档")")
             .font(.caption2)
             .foregroundStyle(ClaudeTheme.textTertiary)
         }
       }
     }
-    .padding(.vertical, 4)
-  }
-}
-
-private struct ScorePillView: View {
-  let min: String?
-  let max: String?
-  let count: String?
-  let countLabel: String
-
-  var body: some View {
-    VStack(alignment: .trailing, spacing: 2) {
-      HStack(spacing: 4) {
-        if let minS = min, !minS.isEmpty {
-          Text(minS)
-            .font(.title3.weight(.bold).monospacedDigit())
-            .foregroundStyle(ClaudeTheme.primary)
-        }
-        if let maxS = max, !maxS.isEmpty {
-          Text("~\(maxS)")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(ClaudeTheme.textTertiary)
-        }
-      }
-      if let c = count, !c.isEmpty {
-        Text("\(c)\(countLabel)")
-          .font(.caption2)
-          .foregroundStyle(ClaudeTheme.textTertiary)
-      }
-    }
+    .padding(14)
+    .background(ClaudeTheme.surfaceCard)
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(ClaudeTheme.border, lineWidth: 0.75)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 }
