@@ -53,11 +53,9 @@ struct ScoreTableView: View {
     VStack(spacing: 0) {
       if !isLoading, errorMessage == nil, !items.isEmpty {
         categoryBar
-        Divider()
       }
       content
     }
-    .background(ClaudeTheme.surface.ignoresSafeArea())
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
     .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
@@ -82,24 +80,21 @@ struct ScoreTableView: View {
             selectedCategory = cat
           } label: {
             Text(cat)
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(selected ? .white : ClaudeTheme.textSecondary)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(selected ? .white : .primary)
               .padding(.horizontal, 14)
               .padding(.vertical, 7)
-              .background(selected ? ClaudeTheme.primary : ClaudeTheme.surfaceCard)
-              .overlay(
-                Capsule().stroke(selected ? ClaudeTheme.primary : ClaudeTheme.border, lineWidth: 0.75)
+              .glassEffect(
+                selected ? .regular.tint(.blue.opacity(0.3)).interactive() : .regular.interactive(),
+                in: .rect(cornerRadius: 999)
               )
-              .clipShape(Capsule())
           }
           .buttonStyle(.plain)
-          .animation(.easeOut(duration: 0.15), value: selectedCategory)
         }
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 10)
     }
-    .background(ClaudeTheme.surfaceCard)
   }
 
   // MARK: Content
@@ -107,13 +102,8 @@ struct ScoreTableView: View {
   @ViewBuilder
   private var content: some View {
     if isLoading {
-      VStack(spacing: 12) {
-        ProgressView().tint(ClaudeTheme.primary)
-        Text("正在加载分数数据")
-          .font(.subheadline)
-          .foregroundStyle(ClaudeTheme.textSecondary)
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      ProgressView("正在加载分数数据")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if let error = errorMessage {
       ContentUnavailableView("加载失败", systemImage: "wifi.exclamationmark", description: Text(error))
     } else if groups.isEmpty {
@@ -129,15 +119,14 @@ struct ScoreTableView: View {
   private var schoolList: some View {
     ScrollView {
       LazyVStack(spacing: 10) {
-        // 顶部统计
         HStack {
           Text("共 \(groups.count) 所院校")
             .font(.caption.weight(.medium))
-            .foregroundStyle(ClaudeTheme.textTertiary)
+            .foregroundStyle(.secondary)
           Spacer()
           Text(isAdmission ? "录取分数线" : "投档分数线")
             .font(.caption)
-            .foregroundStyle(ClaudeTheme.textTertiary)
+            .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 4)
         .padding(.top, 4)
@@ -186,10 +175,10 @@ private struct SchoolGroupRow: View {
       VStack(alignment: .leading, spacing: 5) {
         Text(group.school)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(ClaudeTheme.textPrimary)
+          .foregroundStyle(.primary)
           .lineLimit(2)
           .multilineTextAlignment(.leading)
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
           metaChip(icon: "list.bullet", text: isAdmission ? "\(group.itemCount)个专业" : "\(group.itemCount)个专业组")
           if group.totalPeople > 0 {
             metaChip(icon: "person.2", text: "\(group.totalPeople)人")
@@ -198,28 +187,22 @@ private struct SchoolGroupRow: View {
       }
       Spacer(minLength: 8)
 
-      // 分数区间
       VStack(alignment: .trailing, spacing: 1) {
         if let min = group.minScore {
           Text("\(min)")
             .font(.title3.weight(.bold).monospacedDigit())
-            .foregroundStyle(ClaudeTheme.primary)
+            .foregroundStyle(.blue)
           Text("最低分")
             .font(.caption2)
-            .foregroundStyle(ClaudeTheme.textTertiary)
+            .foregroundStyle(.secondary)
         }
       }
       Image(systemName: "chevron.right")
         .font(.caption)
-        .foregroundStyle(ClaudeTheme.textTertiary)
+        .foregroundStyle(.tertiary)
     }
     .padding(14)
-    .background(ClaudeTheme.surfaceCard)
-    .overlay(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .stroke(ClaudeTheme.border, lineWidth: 0.75)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .nativeGlassPanel(cornerRadius: 16, tint: .blue.opacity(0.05), interactive: true)
   }
 
   private func metaChip(icon: String, text: String) -> some View {
@@ -227,7 +210,7 @@ private struct SchoolGroupRow: View {
       Image(systemName: icon).font(.caption2)
       Text(text).font(.caption2)
     }
-    .foregroundStyle(ClaudeTheme.textTertiary)
+    .foregroundStyle(.secondary)
   }
 }
 
@@ -247,31 +230,25 @@ struct ScoreSchoolDetailView: View {
       }
       .padding(16)
     }
-    .background(ClaudeTheme.surface.ignoresSafeArea())
     .navigationTitle(group.school)
     .navigationBarTitleDisplayMode(.inline)
   }
 
   private var summaryCard: some View {
     HStack(spacing: 0) {
-      summaryStat(value: group.minScore.map(String.init) ?? "—", label: "最低分", accent: ClaudeTheme.primary)
+      summaryStat(value: group.minScore.map(String.init) ?? "—", label: "最低分", accent: .blue)
       divider
-      summaryStat(value: group.maxScore.map(String.init) ?? "—", label: "最高分", accent: ClaudeTheme.info)
+      summaryStat(value: group.maxScore.map(String.init) ?? "—", label: "最高分", accent: .indigo)
       divider
-      summaryStat(value: "\(group.itemCount)", label: isAdmission ? "专业" : "专业组", accent: ClaudeTheme.textSecondary)
+      summaryStat(value: "\(group.itemCount)", label: isAdmission ? "专业" : "专业组", accent: .secondary)
       if group.totalPeople > 0 {
         divider
-        summaryStat(value: "\(group.totalPeople)", label: "人数", accent: ClaudeTheme.success)
+        summaryStat(value: "\(group.totalPeople)", label: "人数", accent: .green)
       }
     }
     .padding(.vertical, 16)
     .frame(maxWidth: .infinity)
-    .background(ClaudeTheme.surfaceCard)
-    .overlay(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .stroke(ClaudeTheme.border, lineWidth: 0.75)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .nativeGlassPanel(cornerRadius: 16, tint: .blue.opacity(0.05))
   }
 
   private func summaryStat(value: String, label: String, accent: Color) -> some View {
@@ -281,14 +258,14 @@ struct ScoreSchoolDetailView: View {
         .foregroundStyle(accent)
       Text(label)
         .font(.caption2)
-        .foregroundStyle(ClaudeTheme.textTertiary)
+        .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity)
   }
 
   private var divider: some View {
     Rectangle()
-      .fill(ClaudeTheme.border)
+      .fill(.secondary.opacity(0.2))
       .frame(width: 0.75, height: 28)
   }
 }
@@ -304,21 +281,21 @@ private struct ScoreItemRow: View {
       VStack(alignment: .leading, spacing: 4) {
         Text(item.title)
           .font(.subheadline.weight(.medium))
-          .foregroundStyle(ClaudeTheme.textPrimary)
+          .foregroundStyle(.primary)
           .lineLimit(2)
           .multilineTextAlignment(.leading)
         if let sub = item.subtitle, !sub.isEmpty {
           Text(sub)
             .font(.caption)
-            .foregroundStyle(ClaudeTheme.textTertiary)
+            .foregroundStyle(.secondary)
             .lineLimit(1)
         }
         if !item.subjectScores.isEmpty {
           HStack(spacing: 6) {
             ForEach(item.subjectScores) { s in
               HStack(spacing: 2) {
-                Text(s.label).foregroundStyle(ClaudeTheme.textTertiary)
-                Text(s.value).foregroundStyle(ClaudeTheme.textSecondary)
+                Text(s.label).foregroundStyle(.secondary)
+                Text(s.value).foregroundStyle(.primary)
               }
               .font(.caption2.monospacedDigit())
             }
@@ -332,27 +309,22 @@ private struct ScoreItemRow: View {
           if let min = item.minScore {
             Text("\(min)")
               .font(.headline.monospacedDigit())
-              .foregroundStyle(ClaudeTheme.primary)
+              .foregroundStyle(.blue)
           }
           if let max = item.maxScore {
             Text("~\(max)")
               .font(.caption.monospacedDigit())
-              .foregroundStyle(ClaudeTheme.textTertiary)
+              .foregroundStyle(.secondary)
           }
         }
         if let count = item.peopleCount {
           Text("\(count)\(isAdmission ? "录取" : "投档")")
             .font(.caption2)
-            .foregroundStyle(ClaudeTheme.textTertiary)
+            .foregroundStyle(.tertiary)
         }
       }
     }
     .padding(14)
-    .background(ClaudeTheme.surfaceCard)
-    .overlay(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .stroke(ClaudeTheme.border, lineWidth: 0.75)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .nativeGlassPanel(cornerRadius: 16, tint: .blue.opacity(0.04))
   }
 }

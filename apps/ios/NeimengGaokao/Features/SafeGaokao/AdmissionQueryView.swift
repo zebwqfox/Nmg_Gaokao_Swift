@@ -130,188 +130,141 @@ struct AdmissionQueryView: View {
 
   var body: some View {
     ScrollView {
-      VStack(spacing: 0) {
-        // Header
-        headerSection
+      VStack(spacing: 20) {
+        inputSection
 
-        Divider().padding(.horizontal)
-
-        // Content
-        VStack(spacing: 20) {
-          inputSection
-
-          if isQuerying {
-            queryingView
-          } else if let result {
-            resultSection(result)
-          } else if notFound {
-            notFoundSection
-          } else if let error = errorMessage {
-            errorSection(error)
-          }
+        if isQuerying {
+          queryingView
+        } else if let result {
+          resultSection(result)
+        } else if notFound {
+          notFoundSection
+        } else if let error = errorMessage {
+          errorSection(error)
         }
-        .padding()
       }
+      .padding()
     }
-    .background(ClaudeTheme.surface.ignoresSafeArea())
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .principal) {
-        Text("录取结果查询")
-          .font(.headline)
-          .foregroundStyle(ClaudeTheme.textPrimary)
-      }
-    }
-  }
-
-  // MARK: Header
-
-  private var headerSection: some View {
-    HStack(spacing: 14) {
-      Image(systemName: "checkmark.seal.fill")
-        .font(.title2)
-        .foregroundStyle(ClaudeTheme.primary)
-      VStack(alignment: .leading, spacing: 2) {
-        Text("录取结果查询")
-          .font(.title3.weight(.semibold))
-          .foregroundStyle(ClaudeTheme.textPrimary)
-        Text("输入考生号和密码，查询录取状态")
-          .font(.caption)
-          .foregroundStyle(ClaudeTheme.textSecondary)
-      }
-      Spacer()
-    }
-    .padding()
+    .navigationTitle("录取结果查询")
+    .navigationBarTitleDisplayMode(.large)
   }
 
   // MARK: Input
 
   private var inputSection: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text("考生信息")
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(ClaudeTheme.textSecondary)
+    VStack(alignment: .leading, spacing: 16) {
+      Label("考生信息", systemImage: "person.text.rectangle")
+        .font(.headline)
 
-      VStack(spacing: 10) {
-        HStack(spacing: 10) {
+      VStack(spacing: 12) {
+        HStack(spacing: 12) {
           Image(systemName: "number")
-            .font(.subheadline)
-            .foregroundStyle(ClaudeTheme.textTertiary)
-            .frame(width: 20)
+            .foregroundStyle(.secondary)
+            .frame(width: 22)
           TextField("考生号（14位）", text: $ksh)
             .keyboardType(.numberPad)
             .autocorrectionDisabled()
-            .font(.body)
-            .foregroundStyle(ClaudeTheme.textPrimary)
         }
-        .claudeInputField()
+        .padding()
+        .nativeGlassPanel(cornerRadius: 12)
 
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
           Image(systemName: "lock")
-            .font(.subheadline)
-            .foregroundStyle(ClaudeTheme.textTertiary)
-            .frame(width: 20)
+            .foregroundStyle(.secondary)
+            .frame(width: 22)
           SecureField("密码", text: $pswd)
-            .font(.body)
-            .foregroundStyle(ClaudeTheme.textPrimary)
         }
-        .claudeInputField()
+        .padding()
+        .nativeGlassPanel(cornerRadius: 12)
       }
 
       Button {
         Task { await submit() }
       } label: {
         HStack(spacing: 8) {
-          if isQuerying { ProgressView().controlSize(.small).tint(.white) }
+          if isQuerying { ProgressView().controlSize(.small) }
           Text(isQuerying ? "查询中…" : "查询录取结果")
+            .font(.body.weight(.semibold))
         }
+        .frame(maxWidth: .infinity)
       }
-      .buttonStyle(.claudeFilled)
+      .buttonStyle(.glassProminent)
       .disabled(isQuerying || ksh.count < 14 || pswd.isEmpty)
 
       Text("密码通常为身份证后6位，具体以官方说明为准。")
         .font(.caption)
-        .foregroundStyle(ClaudeTheme.textTertiary)
+        .foregroundStyle(.secondary)
     }
-    .claudeCard()
+    .padding()
+    .nativeGlassPanel(cornerRadius: 18, tint: .blue.opacity(0.06))
   }
 
   // MARK: Querying
 
   private var queryingView: some View {
     HStack(spacing: 12) {
-      ProgressView().tint(ClaudeTheme.primary)
+      ProgressView()
       Text("正在查询，请稍候…")
         .font(.subheadline)
-        .foregroundStyle(ClaudeTheme.textSecondary)
+        .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .claudeCard()
+    .padding()
+    .nativeGlassPanel(cornerRadius: 16)
   }
 
   // MARK: Result
 
   private func resultSection(_ r: AdmissionQueryResult) -> some View {
     VStack(spacing: 0) {
-      // Name banner
       VStack(spacing: 8) {
-        HStack(spacing: 8) {
-          Image(systemName: "checkmark.circle.fill")
-            .font(.title3)
-            .foregroundStyle(ClaudeTheme.success)
-          Text("\(r.name) 已录取")
-            .font(.title3.weight(.semibold))
-            .foregroundStyle(ClaudeTheme.textPrimary)
-        }
+        Image(systemName: "checkmark.seal.fill")
+          .font(.largeTitle)
+          .foregroundStyle(.green)
+        Text(r.name)
+          .font(.title2.bold())
+        Text("已录取")
+          .font(.subheadline)
+          .foregroundStyle(.green)
         Text(r.ksh)
           .font(.caption.monospacedDigit())
-          .foregroundStyle(ClaudeTheme.textTertiary)
+          .foregroundStyle(.tertiary)
       }
       .frame(maxWidth: .infinity)
       .padding(.vertical, 20)
-      .background(ClaudeTheme.success.opacity(0.06))
 
       Divider()
 
-      // Detail rows
-      VStack(spacing: 0) {
-        resultRow(icon: "building.columns", label: "录取院校", value: r.school, accent: ClaudeTheme.info)
-        Divider().padding(.leading, 48)
-        resultRow(icon: "graduationcap", label: "录取专业", value: r.major, accent: ClaudeTheme.primary)
-        Divider().padding(.leading, 48)
-        resultRow(icon: "tray.and.arrow.down", label: "录取批次", value: r.batch, accent: ClaudeTheme.textSecondary)
-        Divider().padding(.leading, 48)
-        resultRow(icon: "checkmark.seal", label: "录取方式", value: r.admissionType, accent: ClaudeTheme.textSecondary)
+      VStack(alignment: .leading, spacing: 0) {
+        resultRow(icon: "building.columns.fill", tint: .blue, label: "录取院校", value: r.school)
+        Divider().padding(.leading, 36)
+        resultRow(icon: "graduationcap.fill", tint: .purple, label: "录取专业", value: r.major)
+        Divider().padding(.leading, 36)
+        resultRow(icon: "tray.and.arrow.down.fill", tint: .orange, label: "录取批次", value: r.batch)
+        Divider().padding(.leading, 36)
+        resultRow(icon: "checkmark.circle.fill", tint: .green, label: "录取方式", value: r.admissionType)
       }
-      .padding(.vertical, 4)
+      .padding()
     }
-    .background(ClaudeTheme.surfaceCard)
-    .overlay(
-      RoundedRectangle(cornerRadius: 14, style: .continuous)
-        .stroke(ClaudeTheme.success.opacity(0.3), lineWidth: 0.75)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .nativeGlassPanel(cornerRadius: 18, tint: .green.opacity(0.06))
   }
 
-  private func resultRow(icon: String, label: String, value: String, accent: Color) -> some View {
+  private func resultRow(icon: String, tint: Color, label: String, value: String) -> some View {
     HStack(alignment: .top, spacing: 12) {
       Image(systemName: icon)
-        .font(.subheadline)
-        .foregroundStyle(accent)
+        .foregroundStyle(tint)
         .frame(width: 24)
-        .padding(.leading, 16)
-        .padding(.top, 14)
       VStack(alignment: .leading, spacing: 2) {
         Text(label)
           .font(.caption)
-          .foregroundStyle(ClaudeTheme.textTertiary)
+          .foregroundStyle(.secondary)
         Text(value.isEmpty ? "—" : value)
-          .font(.subheadline.weight(.medium))
-          .foregroundStyle(ClaudeTheme.textPrimary)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.primary)
       }
-      .padding(.vertical, 14)
       Spacer()
     }
+    .padding(.vertical, 12)
   }
 
   // MARK: Not found
@@ -319,36 +272,35 @@ struct AdmissionQueryView: View {
   private var notFoundSection: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
-        Image(systemName: "questionmark.circle")
+        Image(systemName: "person.fill.questionmark")
           .font(.title3)
-          .foregroundStyle(ClaudeTheme.primary)
+          .foregroundStyle(.orange)
         Text("未查到录取信息")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(ClaudeTheme.textPrimary)
+          .font(.headline)
       }
       Text("请确认考生号和密码是否正确，录取信息可能尚未更新。")
         .font(.subheadline)
-        .foregroundStyle(ClaudeTheme.textSecondary)
+        .foregroundStyle(.secondary)
 
       if let snippet = debugSnippet, !snippet.isEmpty {
         VStack(alignment: .leading, spacing: 6) {
           Text("服务器响应（调试）")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(ClaudeTheme.textTertiary)
+            .foregroundStyle(.secondary)
           ScrollView {
             Text(snippet)
               .font(.caption.monospaced())
-              .foregroundStyle(ClaudeTheme.textTertiary)
+              .foregroundStyle(.secondary)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
           .frame(maxHeight: 180)
         }
         .padding(10)
-        .background(ClaudeTheme.border.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .nativeGlassPanel(cornerRadius: 10, tint: .orange.opacity(0.06))
       }
     }
-    .claudeCard()
+    .padding()
+    .nativeGlassPanel(cornerRadius: 18, tint: .orange.opacity(0.05))
   }
 
   // MARK: Error
@@ -356,19 +308,19 @@ struct AdmissionQueryView: View {
   private func errorSection(_ message: String) -> some View {
     HStack(alignment: .top, spacing: 12) {
       Image(systemName: "exclamationmark.triangle")
-        .font(.subheadline)
-        .foregroundStyle(ClaudeTheme.primary)
+        .foregroundStyle(.orange)
       VStack(alignment: .leading, spacing: 4) {
         Text("查询失败")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(ClaudeTheme.textPrimary)
+          .font(.headline)
         Text(message)
           .font(.caption)
-          .foregroundStyle(ClaudeTheme.textSecondary)
+          .foregroundStyle(.secondary)
       }
+      Spacer()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .claudePrimaryCard()
+    .padding()
+    .nativeGlassPanel(cornerRadius: 18, tint: .orange.opacity(0.06))
   }
 
   // MARK: Submit
