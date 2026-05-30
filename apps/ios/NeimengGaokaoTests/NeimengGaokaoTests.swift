@@ -192,6 +192,33 @@ final class NeimengGaokaoTests: XCTestCase {
     })
   }
 
+  func testOfficialArticleParserIgnoresSafeGaokaoBannerTitle() {
+    let html = """
+    <head><title>内蒙古自治区2026年普通高等学校招生工作规定-政策规定</title></head>
+    <header>
+      <h1><a href="" style="color:#4cc797;">平&nbsp;安&nbsp;高&nbsp;考</a></h1>
+    </header>
+    <div class="xl">
+      <div class="xlTit">内蒙古自治区2026年普通高等学校招生工作规定</div>
+      <div class="time">发布时间：2026-05-07 12:04  来源：自治区教育厅高校学生处</div>
+      <div class="con">
+        <div class="TRS_Editor"><p>为做好2026年普通高等学校招生工作，制定本规定。</p></div>
+      </div>
+    </div>
+    """
+    let fallback = CachedArticle(
+      id: "safe-gaokao",
+      categoryID: "policy",
+      categoryTitle: "政策规定",
+      kind: .notice,
+      title: "内蒙古自治区2026年普通高等学校招生工作规定",
+      originalURL: URL(string: "https://www.nm.zsks.cn/ztzl/pagkpt/zcgd/202605/t20260507_46367.html")!
+    )
+    let parsed = OfficialArticleParser.parse(html: html, fallback: fallback)
+    XCTAssertEqual(parsed.title, "内蒙古自治区2026年普通高等学校招生工作规定")
+    XCTAssertEqual(parsed.source, "自治区教育厅高校学生处")
+  }
+
   func testOfficialArticleParserReadsTableAndScriptAttachments() {
     let tableHTML = """
     <div class="TRS_Editor">

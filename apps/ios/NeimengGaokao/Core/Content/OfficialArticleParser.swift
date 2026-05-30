@@ -44,9 +44,52 @@ enum OfficialArticleParser {
   }
 
   private static func extractTitle(from html: String) -> String? {
-    html.firstMatch(of: #"<h1[^>]*>([\s\S]*?)</h1>"#)?[safe: 1]?.strippingHTML.normalizedWhitespace.nilIfBlank
-      ?? html.firstMatch(of: #"<div[^>]+class=["'][^"']*(?:title|bt|article-title)[^"']*["'][^>]*>([\s\S]*?)</div>"#)?[safe: 1]?
-      .strippingHTML.normalizedWhitespace.nilIfBlank
+    let candidates: [String?] = [
+      // 站点正文标题容器（如 <div class="xlTit">…</div>），优先级最高且最可靠
+      html.firstMatch(of: #"<div[^>]+class=["'][^"']*(?:xltit|article-title|bt_title|biaoti)[^"']*["'][^>]*>([\s\S]*?)</div>"#)?[safe: 1]?
+        .strippingHTML.normalizedWhitespace.nilIfBlank,
+      html.firstMatch(of: #"<h1[^>]*>([\s\S]*?)</h1>"#)?[safe: 1]?.strippingHTML.normalizedWhitespace.nilIfBlank,
+      html.firstMatch(of: #"<div[^>]+class=["'][^"']*(?:title|bt|article-title)[^"']*["'][^>]*>([\s\S]*?)</div>"#)?[safe: 1]?
+        .strippingHTML.normalizedWhitespace.nilIfBlank,
+      titleFromHeadTag(in: html),
+    ]
+    return candidates.lazy.compactMap { $0 }.first(where: { isLikelyArticleTitle($0) })
+  }
+
+  /// 去掉装饰性 banner 候选：把空白移除后命中已知 banner 文本即视为非文章标题
+  private static let bannerStripPatterns: Set<String> = [
+    "平安高考",
+    "内蒙古招生考试信息网",
+    "内蒙古自治区教育考试院",
+    "高考相关政策信息资讯查分志愿填报录取查询一站式服务平台",
+  ]
+
+  private static func isLikelyArticleTitle(_ candidate: String) -> Bool {
+    let stripped = candidate
+      .replacingOccurrences(of: " ", with: "")
+      .replacingOccurrences(of: "\u{00A0}", with: "")
+      .replacingOccurrences(of: "\u{3000}", with: "")  // 全角空格
+      .replacingOccurrences(of: "\t", with: "")
+      .replacingOccurrences(of: "\n", with: "")
+    if stripped.isEmpty { return false }
+    if bannerStripPatterns.contains(stripped) { return false }
+    // 太短且高度重复空格的多半是 banner（如 "平 安 高 考"）
+    if stripped.count < 5, candidate.count > stripped.count + 1 { return false }
+    return true
+  }
+
+  /// 从 <head><title> 取文章标题，去掉常见站名后缀
+  private static func titleFromHeadTag(in html: String) -> String? {
+    guard let raw = html.firstMatch(of: #"<title[^>]*>([\s\S]*?)</title>"#)?[safe: 1] else { return nil }
+    let text = raw.strippingHTML.normalizedWhitespace
+    let separators: [Character] = ["-", "—", "|", "_"]
+    for sep in separators {
+      if let idx = text.firstIndex(of: sep) {
+        let head = text[..<idx].trimmingCharacters(in: .whitespaces)
+        if head.count >= 6 { return String(head) }
+      }
+    }
+    return text.nilIfBlank
   }
 
   private static func extractPublishedAt(from html: String) -> Date? {

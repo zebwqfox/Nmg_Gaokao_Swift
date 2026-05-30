@@ -10,6 +10,7 @@ struct ArticleRemoteImage: View {
 
   @State private var image: UIImage?
   @State private var failed = false
+  @State private var isZoomed = false
 
   init(url: URL, caption: String, referer: URL? = nil) {
     self.remoteURL = url
@@ -44,6 +45,18 @@ struct ArticleRemoteImage: View {
             .scaledToFit()
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(alignment: .bottomTrailing) {
+              Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(6)
+                .background(.black.opacity(0.4), in: Circle())
+                .padding(8)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture { isZoomed = true }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("轻点放大查看")
             .transition(.opacity.combined(with: .scale(scale: 0.985)))
         } else if failed {
           ContentUnavailableView("图片加载失败", systemImage: "photo", description: Text(caption))
@@ -65,6 +78,11 @@ struct ArticleRemoteImage: View {
     }
     .task(id: loadKey) {
       await load()
+    }
+    .fullScreenCover(isPresented: $isZoomed) {
+      if let image {
+        ZoomableImageViewer(image: image, caption: caption)
+      }
     }
   }
 
